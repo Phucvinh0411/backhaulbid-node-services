@@ -7,6 +7,7 @@ import {
 import { NotificationService } from './notification.service.js';
 import { NotificationController } from './notification.controller.js';
 import { NotificationGateway } from './notification.gateway.js';
+import { MilestoneConsumer } from './milestone.consumer.js';
 
 @Module({
   imports: [
@@ -14,8 +15,9 @@ import { NotificationGateway } from './notification.gateway.js';
       { name: Notification.name, schema: NotificationSchema },
     ]),
   ],
-  controllers: [NotificationController],
+  controllers: [NotificationController, MilestoneConsumer],
   providers: [NotificationService, NotificationGateway],
   exports: [NotificationService],
 })
 export class NotificationModule {}
+
