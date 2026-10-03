@@ -8,7 +8,7 @@ describe('Notification identity boundary', () => {
       countUnread: jest.fn(),
       markAllAsRead: jest.fn(),
     } as any;
-    const controller = new NotificationController(service);
+    const controller = new NotificationController(service, { get: jest.fn() } as any);
 
     await expect(controller.getMyNotifications(undefined)).rejects.toThrow(
       'Authenticated user is required',

@@ -7,13 +7,23 @@ import {
   HttpCode,
   HttpStatus,
   UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NotificationService } from './notification.service.js';
 import { CreateNotificationDto } from './dto/create-notification.dto.js';
 
 @Controller()
 export class NotificationController {
-  constructor(private readonly notificationService: NotificationService) {}
+  constructor(
+    private readonly notificationService: NotificationService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  @Get('health')
+  health() {
+    return { status: 'UP' };
+  }
 
   /**
    * Lấy danh sách thông báo của user hiện tại
@@ -54,7 +64,14 @@ export class NotificationController {
    * POST /api/v1/notifications/internal/create
    */
   @Post('internal/create')
-  async createNotification(@Body() dto: CreateNotificationDto) {
+  async createNotification(
+    @Body() dto: CreateNotificationDto,
+    @Headers('x-internal-token') token?: string,
+  ) {
+    const expectedToken = this.configService.get<string>('INTERNAL_SERVICE_TOKEN');
+    if (!expectedToken || token !== expectedToken) {
+      throw new ForbiddenException('Invalid internal service token');
+    }
     return this.notificationService.create(dto);
   }
 }

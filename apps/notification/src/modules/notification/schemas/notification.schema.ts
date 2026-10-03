@@ -17,6 +17,9 @@ export class Notification {
   @Prop({ index: true })
   referenceId: string;
 
+  @Prop({ type: String, unique: true, sparse: true })
+  dedupeKey?: string;
+
   @Prop({ default: 'NEW_AUCTION' })
   type: string;
 

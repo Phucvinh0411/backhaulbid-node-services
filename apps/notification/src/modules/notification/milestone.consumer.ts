@@ -21,10 +21,10 @@ export class MilestoneConsumer {
    * đến room của Shipper và Carrier.
    */
   @MessagePattern('trip.milestone.reached')
-  async handleMilestoneReached(
+  handleMilestoneReached(
     @Payload() event: MilestoneReachedEvent,
     @Ctx() context: RmqContext,
-  ): Promise<void> {
+  ): void {
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
 
@@ -34,10 +34,10 @@ export class MilestoneConsumer {
       );
 
       const socketPayload = {
-        milestoneId:   event.milestoneId,
-        tripId:        event.tripId,
+        milestoneId: event.milestoneId,
+        tripId: event.tripId,
         milestoneName: event.milestoneName,
-        status:        'REACHED',
+        status: 'REACHED',
         location: {
           lat: event.actualLat,
           lng: event.actualLng,

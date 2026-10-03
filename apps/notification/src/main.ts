@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { MicroserviceOptions, Transport } from '@nestjs/microservices';
+import { Transport } from '@nestjs/microservices';
 import { AppModule } from './app.module.js';
 
 async function bootstrap() {
@@ -24,7 +24,10 @@ async function bootstrap() {
   app.connectMicroservice({
     transport: Transport.RMQ,
     options: {
-      urls: [configService.get('RABBITMQ_URL') ?? 'amqp://guest:guest@localhost:5672'],
+      urls: [
+        configService.get('RABBITMQ_URL') ??
+          'amqp://guest:guest@localhost:5672',
+      ],
       queue: 'trip.milestone.reached.queue',
       queueOptions: { durable: true },
       noAck: false,
@@ -37,7 +40,8 @@ async function bootstrap() {
   const port = configService.get('NOTIFICATION_PORT') ?? '3002';
   await app.listen(port, '0.0.0.0');
   logger.log(`🔔 Notification service running on port ${port}`);
-  logger.log(`🐇 RabbitMQ consumer connected — listening 'trip.milestone.reached.queue'`);
+  logger.log(
+    `🐇 RabbitMQ consumer connected — listening 'trip.milestone.reached.queue'`,
+  );
 }
 void bootstrap();
-

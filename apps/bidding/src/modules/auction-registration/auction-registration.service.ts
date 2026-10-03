@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -21,6 +22,10 @@ import { RegisterAuctionDto } from './dto/register-auction.dto';
 import { RetryPaymentDto } from './dto/retry-payment.dto';
 import { ListMyRegistrationsQueryDto } from './dto/list-my-registrations-query.dto';
 import {
+  CarrierReputationClient,
+  MINIMUM_AUCTION_REPUTATION_SCORE,
+} from '../../integrations/fleet/carrier-reputation.client';
+import {
   AuctionRegistration,
   AuctionRegistrationDocument,
 } from './schemas/auction-registration.schema';
@@ -34,6 +39,7 @@ export class AuctionRegistrationService {
     private readonly registrationModel: Model<AuctionRegistrationDocument>,
     private readonly auctionService: AuctionService,
     private readonly walletClient: WalletClient,
+    private readonly reputationClient: CarrierReputationClient,
   ) {}
 
   async register(
@@ -43,6 +49,15 @@ export class AuctionRegistrationService {
   ) {
     const auction = await this.auctionService.findById(auctionId);
     this.assertRegistrationOpen(auction);
+    const reputationScore = await this.reputationClient.getScore(carrierId);
+    if (reputationScore < MINIMUM_AUCTION_REPUTATION_SCORE) {
+      throw new ForbiddenException({
+        code: 'REPUTATION_TOO_LOW',
+        message: `Cần tối thiểu ${MINIMUM_AUCTION_REPUTATION_SCORE} điểm uy tín để tham gia đấu giá`,
+        reputationScore,
+        minimumReputationScore: MINIMUM_AUCTION_REPUTATION_SCORE,
+      });
+    }
 
     const existing = await this.registrationModel
       .findOne({ auctionId, carrierId })
@@ -114,11 +129,25 @@ export class AuctionRegistrationService {
 
   async getAccess(auctionId: string, carrierId: string) {
     const auction = await this.auctionService.findById(auctionId);
+    const reputationScore = await this.reputationClient.getScore(carrierId);
+    const reputation = {
+      reputationScore,
+      minimumReputationScore: MINIMUM_AUCTION_REPUTATION_SCORE,
+    };
+    if (reputationScore < MINIMUM_AUCTION_REPUTATION_SCORE) {
+      return {
+        canRegister: false,
+        canEnter: false,
+        accessStatus: 'REPUTATION_TOO_LOW',
+        ...reputation,
+      };
+    }
     const registration = await this.registrationModel
       .findOne({ auctionId, carrierId })
       .exec();
     if (!registration) {
       return {
+        ...reputation,
         canRegister: auction.registrationOpen,
         canEnter: false,
         accessStatus: auction.registrationOpen
@@ -131,6 +160,7 @@ export class AuctionRegistrationService {
 
     if (registration.status === RegistrationStatus.CANCELLED) {
       return {
+        ...reputation,
         canRegister: false,
         canEnter: false,
         accessStatus: 'REGISTRATION_CANCELLED',
@@ -140,6 +170,7 @@ export class AuctionRegistrationService {
 
     if (registration.paymentStatus !== RegistrationPaymentStatus.COMPLETED) {
       return {
+        ...reputation,
         canRegister: false,
         canEnter: false,
         accessStatus: 'PAYMENT_INCOMPLETE',
@@ -152,6 +183,7 @@ export class AuctionRegistrationService {
     const now = new Date();
     if (auction.status === AuctionStatus.CANCELLED) {
       return {
+        ...reputation,
         canRegister: false,
         canEnter: false,
         accessStatus: 'AUCTION_CANCELLED',
@@ -159,6 +191,7 @@ export class AuctionRegistrationService {
     }
     if (auction.status === AuctionStatus.COMPLETED || now >= auction.endTime) {
       return {
+        ...reputation,
         canRegister: false,
         canEnter: false,
         accessStatus: 'AUCTION_COMPLETED',
@@ -166,6 +199,7 @@ export class AuctionRegistrationService {
     }
     if (now < auction.startTime) {
       return {
+        ...reputation,
         canRegister: false,
         canEnter: false,
         accessStatus: 'WAITING_FOR_START',
@@ -175,6 +209,7 @@ export class AuctionRegistrationService {
     }
 
     return {
+      ...reputation,
       canRegister: false,
       canEnter: true,
       accessStatus: 'AUCTION_OPEN',

@@ -10,6 +10,7 @@ describe('AuctionRegistrationService (Release Loser Deposits)', () => {
   let mockRegistrationModel: any;
   let mockAuctionService: any;
   let mockWalletClient: any;
+  let mockReputationClient: any;
 
   beforeEach(() => {
     mockRegistrationModel = {
@@ -26,11 +27,13 @@ describe('AuctionRegistrationService (Release Loser Deposits)', () => {
       payFee: jest.fn(),
       release: jest.fn(),
     };
+    mockReputationClient = { getScore: jest.fn().mockResolvedValue(100) };
 
     service = new AuctionRegistrationService(
       mockRegistrationModel,
       mockAuctionService,
       mockWalletClient,
+      mockReputationClient,
     );
   });
 

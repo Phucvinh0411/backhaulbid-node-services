@@ -8,6 +8,7 @@ describe('AuctionService (Fraud Flag & Lifecycle)', () => {
   let mockBidModel: any;
   let mockEventsService: any;
   let mockWalletClient: any;
+  let mockAwardService: any;
 
   beforeEach(() => {
     mockAuctionRepo = {
@@ -48,12 +49,14 @@ describe('AuctionService (Fraud Flag & Lifecycle)', () => {
         transactionId: 'wallet-forfeit-1',
       }),
     };
+    mockAwardService = { createForWinner: jest.fn() };
 
     service = new AuctionService(
       mockAuctionRepo,
       mockBidModel,
       mockWalletClient,
       mockEventsService,
+      mockAwardService,
     );
   });
 

@@ -20,4 +20,8 @@ export class CreateNotificationDto {
   @IsString()
   @IsOptional()
   type?: string;
+
+  @IsString()
+  @IsOptional()
+  dedupeKey?: string;
 }

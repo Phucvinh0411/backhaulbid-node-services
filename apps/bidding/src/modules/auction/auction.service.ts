@@ -26,6 +26,7 @@ import {
   AuctionStatusPayload,
   BiddingEventsService,
 } from '../bidding/bidding-events.service';
+import { AuctionAwardService } from './auction-award.service';
 
 @Injectable()
 export class AuctionService {
@@ -35,6 +36,7 @@ export class AuctionService {
     private readonly bidModel: Model<BidDocument>,
     private readonly walletClient: WalletClient,
     private readonly eventsService: BiddingEventsService,
+    private readonly awardService: AuctionAwardService,
   ) {}
 
   async create(
@@ -353,6 +355,10 @@ export class AuctionService {
     const auction = await this.getAndSynchronizeStatus(auctionId);
     this.assertOwnerOrAdmin(auction, actorId, role);
     if (auction.status !== AuctionStatus.OPEN) {
+      if (auction.status === AuctionStatus.COMPLETED) {
+        await this.ensureAward(auction);
+        return this.serialize(auction);
+      }
       throw new ConflictException('Only open auctions can be completed');
     }
     if (new Date() < auction.endTime) {
@@ -368,6 +374,7 @@ export class AuctionService {
         : null;
     auction.winningBidId = winningBid?._id ?? null;
     await auction.save();
+    await this.awardService.createForWinner(auction, winningBid);
     this.emitStatus(auction, winningBid?.bidAmount?.toString() ?? null);
     return this.serialize(auction);
   }
@@ -398,7 +405,23 @@ export class AuctionService {
 
     auction.winningBidId = winningBid._id;
     await auction.save();
+    await this.awardService.createForWinner(auction, winningBid);
     this.emitStatus(auction, winningBid.bidAmount.toString());
+    return this.serialize(auction);
+  }
+
+  async retryAward(auctionId: string, actorId: string, role: string) {
+    const auction = await this.auctionRepo.findById(auctionId);
+    if (!auction) throw new NotFoundException('Auction not found');
+    this.assertOwnerOrAdmin(auction, actorId, role);
+    if (auction.status !== AuctionStatus.COMPLETED || !auction.winningBidId) {
+      throw new ConflictException('A completed auction with a selected winner is required');
+    }
+    const winningBid = await this.bidModel
+      .findOne({ _id: auction.winningBidId, auctionId: auction._id })
+      .exec();
+    if (!winningBid) throw new NotFoundException('Winning bid not found');
+    await this.awardService.createForWinner(auction, winningBid);
     return this.serialize(auction);
   }
 
@@ -487,7 +510,19 @@ export class AuctionService {
       shouldSave = true;
     }
     if (shouldSave) await auction.save();
+    if (shouldSave && auction.status === AuctionStatus.COMPLETED) {
+      await this.ensureAward(auction);
+    }
     return auction;
+  }
+
+  private async ensureAward(auction: AuctionDocument) {
+    if (auction.awardStatus === 'CREATED' || auction.awardStatus === 'NO_WINNER') return;
+    if (!auction.winningBidId && auction.auctionType === AuctionType.SEALED) return;
+    const winningBid = auction.winningBidId
+      ? await this.bidModel.findOne({ _id: auction.winningBidId, auctionId: auction._id }).exec()
+      : null;
+    await this.awardService.createForWinner(auction, winningBid);
   }
 
   private validateSchedule(
@@ -611,11 +646,33 @@ export class AuctionService {
         now >= auction.startTime &&
         now < auction.endTime,
       winningBidId: auction.winningBidId ?? null,
+      awardStatus: auction.awardStatus ?? null,
+      awardTripId: auction.awardTripId ?? null,
+      awardError: auction.awardError ?? null,
+      awardProgress: this.serializeAwardProgress(auction),
       cancellationReason: auction.cancellationReason ?? null,
       fraudFlag: auction.fraudFlag ?? false,
       fraudReason: auction.fraudReason ?? null,
       createdAt: auction.createdAt,
       updatedAt: auction.updatedAt,
+    };
+  }
+
+  private serializeAwardProgress(auction: AuctionDocument) {
+    const attempts = auction.awardAttempts ?? [];
+    const current = attempts.find((attempt) =>
+      [
+        'CREATING',
+        'CREATION_FAILED',
+        'AWAITING_CARRIER_SIGNATURE',
+        'AWAITING_SHIPPER_SIGNATURE',
+      ].includes(attempt.status),
+    );
+    return {
+      currentAttempt: current?.attemptNumber ?? attempts.length,
+      maximumAttempts: 1 + 3,
+      status: current?.status ?? auction.awardStatus ?? null,
+      signingDeadlineAt: current?.signingDeadlineAt ?? null,
     };
   }
 }
