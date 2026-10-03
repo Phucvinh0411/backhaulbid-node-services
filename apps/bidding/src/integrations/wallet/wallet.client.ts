@@ -54,6 +54,10 @@ export class WalletClient {
     return this.request(`/internal/wallets/${accountId}/charges`, input);
   }
 
+  refund(accountId: string, input: WalletOperationInput) {
+    return this.request(`/internal/wallets/${accountId}/refunds`, input);
+  }
+
   release(holdId: string, idempotencyKey: string) {
     return this.request(`/internal/wallet-holds/${holdId}/release`, {
       idempotencyKey,

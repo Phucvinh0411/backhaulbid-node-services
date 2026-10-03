@@ -24,10 +24,20 @@ export class NotificationService {
       title: dto.title,
       message: dto.message,
       referenceId: dto.referenceId,
+      dedupeKey: dto.dedupeKey,
       type: dto.type ?? 'NEW_AUCTION',
       isRead: false,
     });
-    const saved = await notification.save();
+    let saved: NotificationDocument;
+    try {
+      saved = await notification.save();
+    } catch (error) {
+      if (dto.dedupeKey && (error as { code?: number }).code === 11000) {
+        const existing = await this.notificationModel.findOne({ dedupeKey: dto.dedupeKey }).exec();
+        if (existing) return existing;
+      }
+      throw error;
+    }
     this.logger.log(
       `Notification created for user ${dto.userId}: ${dto.title}`,
     );

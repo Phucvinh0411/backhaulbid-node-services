@@ -16,6 +16,53 @@ import {
 
 export type AuctionDocument = HydratedDocument<Auction>;
 
+export enum AuctionAwardAttemptStatus {
+  QUEUED = 'QUEUED',
+  CREATING = 'CREATING',
+  CREATION_FAILED = 'CREATION_FAILED',
+  AWAITING_CARRIER_SIGNATURE = 'AWAITING_CARRIER_SIGNATURE',
+  AWAITING_SHIPPER_SIGNATURE = 'AWAITING_SHIPPER_SIGNATURE',
+  SIGNED = 'SIGNED',
+  CARRIER_EXPIRED = 'CARRIER_EXPIRED',
+  SHIPPER_EXPIRED = 'SHIPPER_EXPIRED',
+  SKIPPED = 'SKIPPED',
+}
+
+@Schema({ _id: false })
+export class AuctionAwardAttempt {
+  @Prop({ type: String, required: true })
+  attemptId!: string;
+
+  @Prop({ type: Number, required: true })
+  attemptNumber!: number;
+
+  @Prop({ type: String, required: true })
+  bidId!: string;
+
+  @Prop({ type: String, required: true })
+  carrierId!: string;
+
+  @Prop({ type: String, required: true })
+  bidAmount!: string;
+
+  @Prop({ type: String, enum: AuctionAwardAttemptStatus, required: true })
+  status!: AuctionAwardAttemptStatus;
+
+  @Prop({ type: Date, default: null })
+  signingDeadlineAt!: Date | null;
+
+  @Prop({ type: String, default: null })
+  tripId!: string | null;
+
+  @Prop({ type: String, default: null })
+  contractId!: string | null;
+
+  @Prop({ type: String, default: null, maxlength: 500 })
+  failureReason!: string | null;
+}
+
+export const AuctionAwardAttemptSchema = SchemaFactory.createForClass(AuctionAwardAttempt);
+
 @Schema({ collection: 'auctions', timestamps: true, versionKey: false })
 export class Auction {
   @Prop({ type: String, default: () => randomUUID() })
@@ -135,6 +182,21 @@ export class Auction {
 
   @Prop({ type: String, default: null })
   winningBidId!: string | null;
+
+  @Prop({ type: String, default: null })
+  awardStatus!: string | null;
+
+  @Prop({ type: String, default: null })
+  awardTripId!: string | null;
+
+  @Prop({ type: String, default: null, maxlength: 500 })
+  awardError!: string | null;
+
+  @Prop({ type: [AuctionAwardAttemptSchema], default: [] })
+  awardAttempts!: AuctionAwardAttempt[];
+
+  @Prop({ type: Boolean, default: false })
+  awardCleanupCompleted!: boolean;
 
   @Prop({ type: String, default: null, trim: true })
   cancellationReason!: string | null;
