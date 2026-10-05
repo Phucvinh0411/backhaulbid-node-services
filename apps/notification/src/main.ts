@@ -36,10 +36,10 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api/v1/notifications');
 
-  await app.startAllMicroservices();
   const port = configService.get('NOTIFICATION_PORT') ?? '3002';
   await app.listen(port, '0.0.0.0');
   logger.log(`🔔 Notification service running on port ${port}`);
+  await app.startAllMicroservices();
   logger.log(
     `🐇 RabbitMQ consumer connected — listening 'trip.milestone.reached.queue'`,
   );
