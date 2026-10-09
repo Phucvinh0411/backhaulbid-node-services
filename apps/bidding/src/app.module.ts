@@ -7,6 +7,7 @@ import { AuctionModule } from './modules/auction/auction.module';
 import { AuctionRegistrationModule } from './modules/auction-registration/auction-registration.module';
 import { BidModule } from './modules/bid/bid.module';
 import { BiddingModule } from './modules/bidding/bidding.module';
+import { StatisticsModule } from './modules/statistics/statistics.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { BiddingModule } from './modules/bidding/bidding.module';
     AuctionRegistrationModule,
     BidModule,
     BiddingModule,
+    StatisticsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

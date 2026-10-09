@@ -9,6 +9,8 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  ArrayMaxSize,
+  MaxLength,
   Matches,
   Min,
   ValidateNested,
@@ -49,6 +51,14 @@ export class CreateAuctionDto {
   @IsNotEmpty()
   vehicleTypeRequired!: string;
 
+  /** Optional shipper proof of the goods' declared value: keys or upload URLs from the goods-value-docs folder. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsString({ each: true })
+  @MaxLength(500, { each: true })
+  valueDocuments?: string[];
+
   @IsOptional()
   @IsString()
   requiredTemp?: string;
@@ -68,6 +78,11 @@ export class CreateAuctionDto {
 
   @IsEnum(AuctionType)
   auctionType!: AuctionType;
+
+  /** When true, only carriers whose cargo-liability certificate an admin verified (and not expired) may bid. */
+  @IsOptional()
+  @IsBoolean()
+  requireCarrierCoverage?: boolean;
 
   @IsString()
   @Matches(/^\d+(\.\d{1,2})?$/, {

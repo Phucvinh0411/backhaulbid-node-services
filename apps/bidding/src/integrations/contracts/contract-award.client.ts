@@ -1,6 +1,14 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+export interface ContractRoutePoint {
+  latitude: number | null;
+  longitude: number | null;
+  label: string;
+  address: string;
+  source: 'USER_CONFIRMED' | null;
+}
+
 export interface ContractAwardInput {
   auctionId: string;
   awardAttemptId: string;
@@ -10,6 +18,8 @@ export interface ContractAwardInput {
   vehicleId: string;
   pickupLocation: string;
   deliveryLocation: string;
+  pickupPoint?: ContractRoutePoint | null;
+  deliveryPoint?: ContractRoutePoint | null;
   agreedPrice: string;
   expectedDeliveryAt: string | null;
   depositHoldId: string | null;

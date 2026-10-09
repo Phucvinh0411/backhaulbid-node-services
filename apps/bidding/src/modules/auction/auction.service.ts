@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AuctionDocument } from './schemas/auction.schema';
+import { normalizeValueDocuments } from './value-documents';
 import { AuctionRepository } from './auction.repository';
 import { CreateAuctionDto } from './dto/create-auction.dto';
 import { ListAuctionsQueryDto } from './dto/list-auctions-query.dto';
@@ -27,6 +28,7 @@ import {
   BiddingEventsService,
 } from '../bidding/bidding-events.service';
 import { AuctionAwardService } from './auction-award.service';
+import { confirmedLocation } from '../../common/location-coordinates';
 
 @Injectable()
 export class AuctionService {
@@ -60,6 +62,8 @@ export class AuctionService {
       dto.startTime,
       dto.endTime,
     );
+    // Value documents are stored as private object keys only; they never reach a provider.
+    const { valueDocuments, ...auctionInput } = dto;
     const maxPrice = this.parseAmount(dto.maxPrice, 'maxPrice');
     const priceStep = this.parseAmount(dto.priceStep, 'priceStep');
     const fee = calculateParticipationFee(maxPrice);
@@ -71,9 +75,12 @@ export class AuctionService {
     if (depositAmount !== null && depositAmount > maxPrice) {
       throw new BadRequestException('depositAmount cannot exceed maxPrice');
     }
+    const valueDocumentKeys = normalizeValueDocuments(valueDocuments);
 
     const origin = `${dto.pickupLocation.province} - ${dto.pickupLocation.locationName}`;
     const destination = `${dto.deliveryLocation.province} - ${dto.deliveryLocation.locationName}`;
+    const pickupLocation = confirmedLocation(dto.pickupLocation);
+    const deliveryLocation = confirmedLocation(dto.deliveryLocation);
 
     const auctionId = randomUUID();
 
@@ -94,7 +101,11 @@ export class AuctionService {
       auction = await this.auctionRepo.create({
         _id: auctionId,
         shipperId,
-        ...dto,
+        ...auctionInput,
+        requireCarrierCoverage: dto.requireCarrierCoverage === true,
+        valueDocumentKeys,
+        pickupLocation,
+        deliveryLocation,
         origin,
         destination,
         registrationStartTime,
@@ -244,9 +255,11 @@ export class AuctionService {
 
     if (dto.pickupLocation) {
       update.origin = `${dto.pickupLocation.province} - ${dto.pickupLocation.locationName}`;
+      update.pickupLocation = confirmedLocation(dto.pickupLocation);
     }
     if (dto.deliveryLocation) {
       update.destination = `${dto.deliveryLocation.province} - ${dto.deliveryLocation.locationName}`;
+      update.deliveryLocation = confirmedLocation(dto.deliveryLocation);
     }
 
     if (dto.priceStep !== undefined) {
@@ -619,6 +632,7 @@ export class AuctionService {
       earliestDelivery: auction.deliveryLocation?.earliestTime ?? null,
       latestDelivery: auction.deliveryLocation?.latestTime ?? null,
       auctionType: auction.auctionType,
+      requireCarrierCoverage: auction.requireCarrierCoverage === true,
       maxPrice: auction.maxPrice.toString(),
       priceStep: auction.priceStep ? auction.priceStep.toString() : null,
       maxBids: auction.maxBids ?? null,

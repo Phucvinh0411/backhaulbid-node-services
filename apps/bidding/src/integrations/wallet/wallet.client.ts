@@ -96,10 +96,12 @@ export class WalletClient {
       .json()
       .catch(() => ({}))) as Partial<WalletOperationResult> & {
       message?: string;
+      error?: { message?: string };
     };
     if (!response.ok) {
       throw new WalletClientError(
-        payload.message ??
+        payload.error?.message ??
+          payload.message ??
           `Wallet operation failed with status ${response.status}`,
         response.status,
       );

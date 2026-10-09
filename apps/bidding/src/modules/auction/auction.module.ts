@@ -26,9 +26,12 @@ import { AuctionNotificationClient } from '../../integrations/notifications/auct
     BiddingEventsModule,
   ],
   controllers: [AuctionController],
-  providers: [AuctionRepository, AuctionService, AuctionAwardService, AuctionNotificationClient],
+  providers: [
+    AuctionRepository,
+    AuctionService,
+    AuctionAwardService,
+    AuctionNotificationClient,
+  ],
   exports: [AuctionService],
 })
 export class AuctionModule {}
-
-

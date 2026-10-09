@@ -5,6 +5,7 @@ import { AuctionService } from '../auction/auction.service';
 import { AuctionStatus } from '../../common/enums/auction-status.enum';
 import { AuctionType } from '../../common/enums/auction-type.enum';
 import { AuctionRegistrationService } from '../auction-registration/auction-registration.service';
+import { CarrierCoverageClient } from '../../integrations/identity/carrier-coverage.client';
 import { ListBidsQueryDto } from './dto/list-bids-query.dto';
 import { PlaceBidDto } from './dto/place-bid.dto';
 import { Bid, BidDocument } from './schemas/bid.schema';
@@ -18,6 +19,7 @@ export class BidService {
     private readonly bidModel: Model<BidDocument>,
     private readonly auctionService: AuctionService,
     private readonly registrationService: AuctionRegistrationService,
+    private readonly coverageClient: CarrierCoverageClient,
   ) {}
 
   async place(auctionId: string, carrierId: string, dto: PlaceBidDto) {
@@ -41,6 +43,11 @@ export class BidService {
       const auction = await this.auctionService.findById(auctionId);
       if (auction.status !== AuctionStatus.OPEN || !auction.roomOpen) {
         throw new ConflictException('Auction is not accepting bids');
+      }
+
+      // Only auctions the shipper marked require a verified certificate; other auctions are unchanged.
+      if (auction.requireCarrierCoverage === true) {
+        await this.coverageClient.assertEligible(carrierId);
       }
 
       const amount = Number(dto.bidAmount);

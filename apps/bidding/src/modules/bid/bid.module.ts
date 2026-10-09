@@ -6,6 +6,7 @@ import { Bid, BidSchema } from './schemas/bid.schema';
 import { AuctionModule } from '../auction/auction.module';
 import { AuctionRegistrationModule } from '../auction-registration/auction-registration.module';
 import { BiddingEventsModule } from '../bidding/bidding-events.module';
+import { IdentityModule } from '../../integrations/identity/identity.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { BiddingEventsModule } from '../bidding/bidding-events.module';
     AuctionModule,
     AuctionRegistrationModule,
     BiddingEventsModule,
+    IdentityModule,
   ],
   controllers: [BidController],
   providers: [BidService],

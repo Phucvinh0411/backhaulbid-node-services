@@ -86,6 +86,14 @@ export class Auction {
   @Prop({ type: MongooseSchema.Types.Decimal128 })
   goodsValue?: Types.Decimal128;
 
+  /** Object keys of the shipper's value documents (private folder). Never returned by serialize(). */
+  @Prop({ type: [String], default: [] })
+  valueDocumentKeys?: string[];
+
+  /** Bidders must hold a verified, unexpired cargo-liability certificate. Checked when a bid is placed. */
+  @Prop({ type: Boolean, default: false })
+  requireCarrierCoverage!: boolean;
+
   @Prop({ type: String, required: true, trim: true })
   vehicleTypeRequired!: string;
 
