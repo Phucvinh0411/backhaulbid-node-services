@@ -6,7 +6,8 @@ import { DepositStatus } from '../../common/enums/deposit-status.enum';
 import { RegistrationPaymentStatus } from '../../common/enums/registration-payment-status.enum';
 import { CreationFeeStatus } from '../../common/enums/creation-fee-status.enum';
 import { WalletClient } from '../../integrations/wallet/wallet.client';
-import { ContractAwardClient } from '../../integrations/contracts/contract-award.client';
+import { ContractAwardClient, ContractRoutePoint } from '../../integrations/contracts/contract-award.client';
+import { LocationDetail } from '../../common/schemas/location.schema';
 import { AuctionNotificationClient } from '../../integrations/notifications/auction-notification.client';
 import {
   AuctionRegistration,
@@ -302,6 +303,8 @@ export class AuctionAwardService implements OnModuleInit, OnModuleDestroy {
           vehicleId: registration.vehicleId,
           pickupLocation: auction.origin,
           deliveryLocation: auction.destination,
+          pickupPoint: this.routePoint(auction.pickupLocation),
+          deliveryPoint: this.routePoint(auction.deliveryLocation),
           agreedPrice: attempt.bidAmount,
           expectedDeliveryAt: auction.deliveryLocation?.latestTime?.toISOString() ?? null,
           depositHoldId:
@@ -618,5 +621,18 @@ export class AuctionAwardService implements OnModuleInit, OnModuleDestroy {
 
   private errorMessage(error: unknown) {
     return error instanceof Error ? error.message : 'Lỗi không xác định';
+  }
+
+  private routePoint(location: LocationDetail | undefined): ContractRoutePoint | null {
+    if (!location) return null;
+    const hasPin = Number.isFinite(location.latitude) && Number.isFinite(location.longitude)
+      && location.latitude != null && location.longitude != null;
+    return {
+      latitude: hasPin ? location.latitude! : null,
+      longitude: hasPin ? location.longitude! : null,
+      label: location.locationName,
+      address: `${location.address}, ${location.province}`,
+      source: hasPin ? 'USER_CONFIRMED' : null,
+    };
   }
 }

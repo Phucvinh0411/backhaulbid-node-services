@@ -2,7 +2,7 @@
 
 > **Dịch Vụ Đấu Giá Ngược Thời Gian Thực (NestJS + MongoDB + WebSockets + RabbitMQ)**
 >
-> BackHaulBid Bidding Service là thành phần chịu tải chính liên quan đến hoạt động thời gian thực (real-time) của hệ thống. Dịch vụ đảm nhận khởi tạo phiên đấu giá ngược, nhận bước giá mới từ tài xế qua WebSocket, lưu vết lịch sử đấu giá, kiểm tra thời gian hết hạn và phát hành sự kiện (Events) sang các dịch vụ khác qua RabbitMQ.
+> BackHaulBid Node Services là monorepo NestJS gồm bidding-service và notification-service. Bidding-service quản lý phiên đấu giá, nhận giá từ nhà xe qua REST/WebSocket, lưu lịch sử giá và phát sự kiện qua RabbitMQ.
 
 ---
 
@@ -51,11 +51,20 @@
     ```
     *Dịch vụ sẽ được khởi chạy tại cổng **`3001`**. Sockets Gateway lắng nghe kết nối tại `ws://localhost:3001`*
 
-5.  **Biên dịch dự án (Build Production):**
+5.  **Biên dịch và chạy production:**
     ```bash
     npm run build
-    npm run start:prod
+    npm run start:prod:bidding
     ```
+    Chạy notification-service thay bằng `npm run start:prod:notification`.
+
+### Chức năng bidding hiện tại
+
+- Thống kê theo tài khoản: `GET /api/v1/bidding/statistics/me` cho `SHIPPER` và `CARRIER`; tổng quan toàn hệ thống: `GET /api/v1/bidding/statistics/admin` cho `ADMIN`. Bộ lọc nhận `dateFrom`, `dateTo` và `bucket`.
+- Chủ hàng có thể bật `requireCarrierCoverage` cho phiên. Khi đó bidding-service chỉ nhận giá nếu identity-service xác nhận tài khoản nhà xe có chứng từ bảo hiểm trách nhiệm hàng hóa còn hạn và đã được admin duyệt. Bidding-service cần `IDENTITY_SERVICE_URL` và `INTERNAL_SERVICE_TOKEN`; lỗi hoặc timeout của identity-service sẽ từ chối lượt giá.
+- `valueDocuments` nhận tối đa 5 chứng từ giá trị hàng. Bidding chỉ lưu khóa object trong thư mục riêng tư `goods-value-docs`; API không trả các khóa này và service không gửi chứng từ cho nhà cung cấp bảo hiểm.
+
+Trong Compose, các URL nội bộ và token giữa service được truyền từ `backhaulbid-infrastructure/docker-compose.yml`. Khi chạy bidding-service độc lập, đặt các biến trên cùng những kết nối MongoDB, Redis, RabbitMQ và wallet trong file `.env`.
 
 ---
 
@@ -64,24 +73,12 @@
 Dự án được cấu trúc theo kiến trúc Module chuẩn của **NestJS**, nhóm các Controller, Service, Gateway và Model liên quan vào từng module chức năng:
 
 ```text
-backhaulbid-bidding-service/
-├── src/
-│   ├── config/              # Cấu hình kết nối bên ngoài (database, rabbitmq, redis)
-│   ├── common/              # Lọc ngoại lệ (filters), interceptors, decorators dùng chung
-│   ├── bidding/             # Module quản lý logic đấu giá ngược thời gian thực
-│   │   ├── bidding.module.ts
-│   │   ├── bidding.controller.ts  # REST APIs quản trị phiên đấu giá
-│   │   ├── bidding.service.ts     # Logic xác thực bước giá, tính giờ đấu giá
-│   │   ├── bidding.gateway.ts     # Xử lý các kết nối Websocket (Socket.io)
-│   │   └── schemas/               # Mongoose schemas (BidSession, BidHistory)
-│   ├── messaging/           # Module gửi/nhận tin nhắn không đồng bộ (RabbitMQ client)
-│   │   ├── messaging.module.ts
-│   │   └── rabbitmq.producer.ts   # Gửi sự kiện khi đấu giá xong (BidWonEvent)
-│   ├── app.module.ts        # Module gốc kết nối tất cả các sub-modules
-│   └── main.ts              # Entrypoint khởi tạo NestFactory & lắng nghe cổng 3000
-├── test/                    # Các file unit/integration tests
-├── package.json             # Khai báo script và dependencies
-├── tsconfig.json            # Cấu hình compile TypeScript
+backhaulbid-node-services/
+├── apps/
+│   ├── bidding/             # REST/WebSocket đấu giá, thống kê, chứng từ giá trị, eligibility nhà xe
+│   └── notification/        # REST/WebSocket notification và RabbitMQ consumer
+├── package.json             # Script build/start/test cho hai ứng dụng NestJS
+├── nest-cli.json            # Khai báo ứng dụng trong monorepo
 └── README.md
 ```
 
