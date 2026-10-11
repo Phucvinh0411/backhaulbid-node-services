@@ -9,6 +9,15 @@ export interface ContractRoutePoint {
   source: 'USER_CONFIRMED' | null;
 }
 
+/** A value document as the trip keeps it. The object key is for the contract service's private proxy only. */
+export interface ContractValueDocumentRef {
+  documentId: string;
+  kind: string;
+  objectKey: string;
+  uploadedBy: string;
+  uploadedAt: string;
+}
+
 export interface ContractAwardInput {
   auctionId: string;
   awardAttemptId: string;
@@ -25,6 +34,10 @@ export interface ContractAwardInput {
   depositHoldId: string | null;
   depositAmount: string | null;
   signingDeadlineAt: string;
+  /** The declared goods value at award time; null when the shipper declared none. */
+  declaredGoodsValue: string | null;
+  /** The value documents at award time. Empty when the shipper attached none. */
+  valueDocuments: ContractValueDocumentRef[];
 }
 
 export interface ContractAwardResult {

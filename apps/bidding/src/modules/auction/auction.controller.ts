@@ -7,9 +7,11 @@ import {
   Param,
   Patch,
   Post,
+  Res,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ApiBearerAuth } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { BEARER_AUTH } from '../../openapi';
 import { AuctionService } from './auction.service';
 import { CreateAuctionDto } from './dto/create-auction.dto';
@@ -75,6 +77,54 @@ export class AuctionController {
       normalizeRole(role),
       dto,
     );
+  }
+
+  /** The owner's value-document list and checklist. Other shippers, bidders and drivers get a refusal. */
+  @Get(':auctionId/value-documents')
+  listValueDocuments(
+    @Param('auctionId') auctionId: string,
+    @Headers('x-user-id') actorId: string | undefined,
+    @Headers('x-user-role') role: string | undefined,
+  ) {
+    requireAuthenticated(actorId);
+    requireRole(role, 'ADMIN', 'SHIPPER');
+    return this.auctionService.listValueDocuments(
+      auctionId,
+      actorId,
+      normalizeRole(role),
+    );
+  }
+
+  /**
+   * One value document's bytes, served by the API rather than a storage URL. Bypasses the JSON envelope, so the
+   * headers and the body are written directly.
+   */
+  @Get(':auctionId/value-documents/:documentId/file')
+  async valueDocumentFile(
+    @Param('auctionId') auctionId: string,
+    @Param('documentId') documentId: string,
+    @Headers('x-user-id') actorId: string | undefined,
+    @Headers('x-user-role') role: string | undefined,
+    @Res() response: Response,
+  ) {
+    requireAuthenticated(actorId);
+    requireRole(role, 'ADMIN', 'SHIPPER');
+    const file = await this.auctionService.valueDocumentFile(
+      auctionId,
+      documentId,
+      actorId,
+      normalizeRole(role),
+    );
+    response
+      .status(200)
+      .set({
+        'Content-Type': file.contentType,
+        'Content-Length': String(file.bytes.length),
+        'Content-Disposition': 'inline',
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      })
+      .send(file.bytes);
   }
 
   @Post(':auctionId/open')

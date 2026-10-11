@@ -14,6 +14,7 @@ import {
   AuctionRegistrationDocument,
 } from '../auction-registration/schemas/auction-registration.schema';
 import { Bid, BidDocument } from '../bid/schemas/bid.schema';
+import { awardValueSnapshot } from './value-documents';
 import {
   Auction,
   AuctionAwardAttempt,
@@ -316,6 +317,8 @@ export class AuctionAwardService implements OnModuleInit, OnModuleDestroy {
               ? registration.depositAmount?.toString() ?? null
               : null,
           signingDeadlineAt: deadlineAt.toISOString(),
+          // The same snapshot for every attempt of this auction: documents cannot change once it has completed.
+          ...awardValueSnapshot(auction),
         });
         attempt.status = AuctionAwardAttemptStatus.AWAITING_CARRIER_SIGNATURE;
         attempt.tripId = award.tripId;
