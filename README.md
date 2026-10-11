@@ -62,7 +62,10 @@
 
 - Thống kê theo tài khoản: `GET /api/v1/bidding/statistics/me` cho `SHIPPER` và `CARRIER`; tổng quan toàn hệ thống: `GET /api/v1/bidding/statistics/admin` cho `ADMIN`. Bộ lọc nhận `dateFrom`, `dateTo` và `bucket`.
 - Chủ hàng có thể bật `requireCarrierCoverage` cho phiên. Khi đó bidding-service chỉ nhận giá nếu identity-service xác nhận tài khoản nhà xe có chứng từ bảo hiểm trách nhiệm hàng hóa còn hạn và đã được admin duyệt. Bidding-service cần `IDENTITY_SERVICE_URL` và `INTERNAL_SERVICE_TOKEN`; lỗi hoặc timeout của identity-service sẽ từ chối lượt giá.
-- `valueDocuments` nhận tối đa 5 chứng từ giá trị hàng. Bidding chỉ lưu khóa object trong thư mục riêng tư `goods-value-docs`; API không trả các khóa này và service không gửi chứng từ cho nhà cung cấp bảo hiểm.
+- `valueDocuments` nhận tối đa 5 mục `{key, kind}` (kind: `INVOICE`, `RECEIPT`, `CONTRACT`, `PAYMENT_PROOF`, `OTHER`); mục chuỗi từ client cũ được đọc là `UNCLASSIFIED`. Chỉ nhận khóa tệp trong thư mục riêng tư `goods-value-docs`, không nhận URL tùy ý. Public auction, bid và socket không bao giờ trả khóa hay danh sách chứng từ.
+- Khi `requireCarrierCoverage=true`, tạo phiên và cập nhật phiên phải có giá trị hàng lớn hơn 0 và ít nhất một chứng từ `INVOICE`, `RECEIPT`, `CONTRACT` hoặc `PAYMENT_PROOF`. Đây là checklist chuẩn bị của nền tảng, không bảo đảm nhà bảo hiểm chấp thuận.
+- Chủ phiên hoặc admin đọc danh sách và tệp chứng từ qua `GET /api/v1/bidding/auctions/{auctionId}/value-documents` và `.../value-documents/{documentId}/file`. Tệp được đọc từ media-service bằng `INTERNAL_SERVICE_TOKEN`, cần `MEDIA_SERVICE_URL`.
+- Mỗi lượt trao chuyến gửi cho contract-service giá trị hàng khai báo và các tham chiếu chứng từ tại thời điểm đó, kèm khóa nội bộ.
 
 Trong Compose, các URL nội bộ và token giữa service được truyền từ `backhaulbid-infrastructure/docker-compose.yml`. Khi chạy bidding-service độc lập, đặt các biến trên cùng những kết nối MongoDB, Redis, RabbitMQ và wallet trong file `.env`.
 

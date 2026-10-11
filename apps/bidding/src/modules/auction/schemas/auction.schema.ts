@@ -5,6 +5,7 @@ import { AuctionStatus } from '../../../common/enums/auction-status.enum';
 import { AuctionType } from '../../../common/enums/auction-type.enum';
 import { CreationFeeStatus } from '../../../common/enums/creation-fee-status.enum';
 import { ParticipationFeeTier, CreationFeeTier } from '../fee-policy';
+import { ValueDocumentKind } from '../value-documents';
 import {
   LocationDetail,
   LocationDetailSchema,
@@ -15,6 +16,27 @@ import {
 } from '../../../common/schemas/vehicle.schema';
 
 export type AuctionDocument = HydratedDocument<Auction>;
+
+/** A stored value document. `objectKey` is private: no serializer, bid, or socket payload may return it. */
+@Schema({ _id: false })
+export class AuctionValueDocument {
+  @Prop({ type: String, required: true })
+  documentId!: string;
+
+  @Prop({ type: String, enum: ValueDocumentKind, required: true })
+  kind!: ValueDocumentKind;
+
+  @Prop({ type: String, required: true })
+  objectKey!: string;
+
+  @Prop({ type: String, required: true })
+  uploadedBy!: string;
+
+  @Prop({ type: Date, required: true })
+  uploadedAt!: Date;
+}
+
+export const AuctionValueDocumentSchema = SchemaFactory.createForClass(AuctionValueDocument);
 
 export enum AuctionAwardAttemptStatus {
   QUEUED = 'QUEUED',
@@ -86,7 +108,11 @@ export class Auction {
   @Prop({ type: MongooseSchema.Types.Decimal128 })
   goodsValue?: Types.Decimal128;
 
-  /** Object keys of the shipper's value documents (private folder). Never returned by serialize(). */
+  /** The shipper's typed value documents (private folder). Owner endpoints only; never returned by serialize(). */
+  @Prop({ type: [AuctionValueDocumentSchema], default: [] })
+  valueDocuments!: AuctionValueDocument[];
+
+  /** Bare keys saved before typed documents. Still read (as UNCLASSIFIED); new writes leave this empty. */
   @Prop({ type: [String], default: [] })
   valueDocumentKeys?: string[];
 

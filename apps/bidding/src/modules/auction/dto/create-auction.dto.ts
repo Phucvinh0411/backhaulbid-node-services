@@ -10,7 +10,6 @@ import {
   IsString,
   IsUrl,
   ArrayMaxSize,
-  MaxLength,
   Matches,
   Min,
   ValidateNested,
@@ -19,6 +18,9 @@ import { AuctionType } from '../../../common/enums/auction-type.enum';
 import { LocationDetailDto } from '../../../common/dtos/location.dto';
 import { VehicleSpecsDto } from '../../../common/dtos/vehicle.dto';
 import { ParticipationFeeTier } from '../fee-policy';
+
+/** A typed document reference, or a bare key from an older client (read as UNCLASSIFIED). */
+export type ValueDocumentPayload = string | { key?: unknown; kind?: unknown };
 
 export class CreateAuctionDto {
   @IsString()
@@ -51,13 +53,14 @@ export class CreateAuctionDto {
   @IsNotEmpty()
   vehicleTypeRequired!: string;
 
-  /** Optional shipper proof of the goods' declared value: keys or upload URLs from the goods-value-docs folder. */
+  /**
+   * Optional shipper proof of the goods' declared value: {key, kind} items from the goods-value-docs folder. Each item
+   * is checked by parseValueDocumentInputs, which also accepts a bare key from older clients.
+   */
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(5)
-  @IsString({ each: true })
-  @MaxLength(500, { each: true })
-  valueDocuments?: string[];
+  valueDocuments?: ValueDocumentPayload[];
 
   @IsOptional()
   @IsString()
