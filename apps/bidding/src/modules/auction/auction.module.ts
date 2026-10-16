@@ -10,6 +10,7 @@ import { BiddingEventsModule } from '../bidding/bidding-events.module';
 
 import { WalletModule } from '../../integrations/wallet/wallet.module';
 import { ContractsModule } from '../../integrations/contracts/contracts.module';
+import { MediaModule } from '../../integrations/media/media.module';
 import { AuctionAwardService } from './auction-award.service';
 import { AuctionRegistration, AuctionRegistrationSchema } from '../auction-registration/schemas/auction-registration.schema';
 import { AuctionNotificationClient } from '../../integrations/notifications/auction-notification.client';
@@ -23,6 +24,7 @@ import { AuctionNotificationClient } from '../../integrations/notifications/auct
     ]),
     WalletModule,
     ContractsModule,
+    MediaModule,
     BiddingEventsModule,
   ],
   controllers: [AuctionController],

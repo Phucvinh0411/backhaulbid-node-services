@@ -10,7 +10,14 @@ import { randomUUID } from 'node:crypto';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AuctionDocument } from './schemas/auction.schema';
-import { normalizeValueDocuments } from './value-documents';
+import {
+  ownerValueDocumentView,
+  parseValueDocumentInputs,
+  recordsFromInputs,
+  ValueDocumentRecord,
+  valueDocumentChecklist,
+  valueDocumentsOf,
+} from './value-documents';
 import { AuctionRepository } from './auction.repository';
 import { CreateAuctionDto } from './dto/create-auction.dto';
 import { ListAuctionsQueryDto } from './dto/list-auctions-query.dto';
@@ -28,6 +35,7 @@ import {
   BiddingEventsService,
 } from '../bidding/bidding-events.service';
 import { AuctionAwardService } from './auction-award.service';
+import { MediaFileClient } from '../../integrations/media/media-file.client';
 import { confirmedLocation } from '../../common/location-coordinates';
 
 @Injectable()
@@ -39,6 +47,7 @@ export class AuctionService {
     private readonly walletClient: WalletClient,
     private readonly eventsService: BiddingEventsService,
     private readonly awardService: AuctionAwardService,
+    private readonly mediaFiles: MediaFileClient,
   ) {}
 
   async create(
@@ -75,7 +84,16 @@ export class AuctionService {
     if (depositAmount !== null && depositAmount > maxPrice) {
       throw new BadRequestException('depositAmount cannot exceed maxPrice');
     }
-    const valueDocumentKeys = normalizeValueDocuments(valueDocuments);
+    const inputs = parseValueDocumentInputs(valueDocuments);
+    const documents = recordsFromInputs(inputs, {
+      uploadedBy: shipperId,
+      uploadedAt: new Date(),
+    });
+    this.assertValueDocumentChecklist(
+      dto.requireCarrierCoverage === true,
+      dto.goodsValue ?? null,
+      documents,
+    );
 
     const origin = `${dto.pickupLocation.province} - ${dto.pickupLocation.locationName}`;
     const destination = `${dto.deliveryLocation.province} - ${dto.deliveryLocation.locationName}`;
@@ -103,7 +121,8 @@ export class AuctionService {
         shipperId,
         ...auctionInput,
         requireCarrierCoverage: dto.requireCarrierCoverage === true,
-        valueDocumentKeys,
+        valueDocuments: documents,
+        valueDocumentKeys: [],
         pickupLocation,
         deliveryLocation,
         origin,
@@ -251,7 +270,30 @@ export class AuctionService {
       nextEnd,
     );
 
-    const update: Record<string, unknown> = { ...dto };
+    // Documents are replaced as a whole and checked against the auction as it will be after this update.
+    const { valueDocuments, ...changes } = dto;
+    const update: Record<string, unknown> = { ...changes };
+    let documents: ValueDocumentRecord[] | null = null;
+    if (valueDocuments !== undefined) {
+      documents = recordsFromInputs(
+        parseValueDocumentInputs(valueDocuments),
+        { uploadedBy: actorId, uploadedAt: new Date() },
+        valueDocumentsOf(auction),
+      );
+      update.valueDocuments = documents;
+      update.valueDocumentKeys = [];
+    }
+    if (
+      documents ||
+      dto.goodsValue !== undefined ||
+      dto.requireCarrierCoverage !== undefined
+    ) {
+      this.assertValueDocumentChecklist(
+        (dto.requireCarrierCoverage ?? auction.requireCarrierCoverage) === true,
+        dto.goodsValue ?? auction.goodsValue?.toString() ?? null,
+        documents ?? valueDocumentsOf(auction),
+      );
+    }
 
     if (dto.pickupLocation) {
       update.origin = `${dto.pickupLocation.province} - ${dto.pickupLocation.locationName}`;
@@ -436,6 +478,71 @@ export class AuctionService {
     if (!winningBid) throw new NotFoundException('Winning bid not found');
     await this.awardService.createForWinner(auction, winningBid);
     return this.serialize(auction);
+  }
+
+  /**
+   * The owner's list of value documents with the checklist state. Only the auction's shipper or an admin may call it,
+   * so no bidder or other shipper learns which documents exist.
+   */
+  async listValueDocuments(auctionId: string, actorId: string, role: string) {
+    const auction = await this.getAuctionForOwner(auctionId, actorId, role);
+    const documents = valueDocumentsOf(auction);
+    const checklist = valueDocumentChecklist({
+      requireCarrierCoverage: auction.requireCarrierCoverage === true,
+      goodsValue: auction.goodsValue?.toString() ?? null,
+      documents,
+    });
+    return {
+      data: documents.map((record) =>
+        ownerValueDocumentView(record, auctionId),
+      ),
+      checklist,
+    };
+  }
+
+  /** One value document's bytes, read from private storage after the owner check. */
+  async valueDocumentFile(
+    auctionId: string,
+    documentId: string,
+    actorId: string,
+    role: string,
+  ) {
+    const auction = await this.getAuctionForOwner(auctionId, actorId, role);
+    const document = valueDocumentsOf(auction).find(
+      (record) => record.documentId === documentId.toLowerCase(),
+    );
+    if (!document) throw new NotFoundException('Value document not found');
+    return this.mediaFiles.fetchPrivateFile(document.objectKey);
+  }
+
+  private async getAuctionForOwner(
+    auctionId: string,
+    actorId: string,
+    role: string,
+  ) {
+    const auction = await this.auctionRepo.findById(auctionId);
+    if (!auction) throw new NotFoundException('Auction not found');
+    this.assertOwnerOrAdmin(auction, actorId, role);
+    return auction;
+  }
+
+  private assertValueDocumentChecklist(
+    requireCarrierCoverage: boolean,
+    goodsValue: string | null,
+    documents: ValueDocumentRecord[],
+  ) {
+    const checklist = valueDocumentChecklist({
+      requireCarrierCoverage,
+      goodsValue,
+      documents,
+    });
+    if (!checklist.satisfied) {
+      throw new BadRequestException({
+        message:
+          'Phiên yêu cầu nhà xe có bảo hiểm cần hoàn tất checklist chuẩn bị của nền tảng trước khi đăng. Checklist này không bảo đảm nhà bảo hiểm chấp thuận.',
+        missingItems: checklist.missingItems,
+      });
+    }
   }
 
   async flag(auctionId: string, dto: FlagAuctionDto) {

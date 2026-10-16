@@ -3,5 +3,6 @@
   "compilerOptions": {
     "outDir": "../../dist/apps/bidding"
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*"],
+  "exclude": ["src/**/*.spec.ts"]
 }
