@@ -14,6 +14,8 @@ import { AuctionService } from '../auction/auction.service';
 import { BidService } from '../bid/bid.service';
 import { BiddingEventsService, MONITOR_ROOM } from './bidding-events.service';
 import { GlobalEventBus } from '../../common/events';
+import { AuctionNotificationClient } from '../../integrations/notifications/auction-notification.client';
+import { buildEmptyRouteMatchRequest } from './empty-route-matching';
 
 interface JoinAuctionPayload {
   auctionId?: string;
@@ -54,6 +56,7 @@ export class BiddingGateway implements OnGatewayInit, OnModuleInit {
     private readonly auctionService: AuctionService,
     private readonly bidService: BidService,
     private readonly eventsService: BiddingEventsService,
+    private readonly notificationClient: AuctionNotificationClient,
   ) {}
 
   afterInit(server: Server): void {
@@ -198,39 +201,33 @@ export class BiddingGateway implements OnGatewayInit, OnModuleInit {
   }
 
   public notifyMatchedCarriers(matches: any[], auctionData: any) {
+    const auctionId = String(auctionData.id || auctionData._id || 'UNKNOWN');
+    const trucksByCompany = new Map<string, Set<string>>();
     for (const match of matches) {
-      void (async () => {
-        this.server.to(`company:${match.companyId}`).emit('new_matching_order', {
-          message: 'Có một lộ trình mới phù hợp với xe rỗng của bạn!',
-          routeId: match.id,
-          truckId: match.truckId,
-          orderId: auctionData.id || auctionData._id || 'UNKNOWN',
-          auction: auctionData,
-        });
+      this.server.to(`company:${match.companyId}`).emit('new_matching_order', {
+        message: 'Có một lộ trình mới phù hợp với xe rỗng của bạn!',
+        routeId: match.id,
+        truckId: match.truckId,
+        orderId: auctionId,
+        auction: auctionData,
+      });
+      const trucks = trucksByCompany.get(match.companyId) ?? new Set<string>();
+      if (match.truckId) trucks.add(match.truckId);
+      trucksByCompany.set(match.companyId, trucks);
+    }
 
-        try {
-          const notificationServiceUrl =
-            process.env.NOTIFICATION_SERVICE_URL ||
-            'http://backhaulbid-notification-service:3002';
-          const response = await fetch(`${notificationServiceUrl}/api/v1/notifications/internal/create`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: match.companyId,
-              title: auctionData.title || auctionData.goodsName || 'Lô hàng mới',
-              message: 'Hệ thống vừa tìm thấy 1 lộ trình phù hợp với xe rỗng của bạn!',
-              referenceId: auctionData.id || auctionData._id || 'UNKNOWN',
-              type: 'NEW_AUCTION'
-            })
-          });
-          if (!response.ok) {
-            const body = await response.text().catch(() => '');
-            console.error('Failed to create internal notification:', response.status, body);
-          }
-        } catch (err) {
-          console.error('Failed to create internal notification', err);
-        }
-      })();
+    // One notification per carrier and auction, even when several of its routes match. The client sends the
+    // internal token and logs failures; the dedupe key keeps a re-emitted auction_created from notifying twice.
+    for (const [companyId, trucks] of trucksByCompany) {
+      const truckList = [...trucks].join(', ');
+      void this.notificationClient.notify({
+        userId: companyId,
+        title: auctionData.title || auctionData.goodsName || 'Lô hàng mới',
+        message: `Lô hàng ${auctionData.origin ?? ''} → ${auctionData.destination ?? ''} phù hợp với xe rỗng ${truckList || 'của bạn'}.`,
+        auctionId,
+        dedupeKey: `empty-route-match:${auctionId}:${companyId}`,
+        type: 'NEW_AUCTION',
+      });
     }
   }
 
@@ -246,15 +243,7 @@ export class BiddingGateway implements OnGatewayInit, OnModuleInit {
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                origin: auction.origin,
-                destination: auction.destination,
-                latestPickup:
-                  auction.latestPickup ||
-                  auction.pickupLocation?.latestTime ||
-                  auction.pickupLocation?.timeWindowEnd,
-                vehicleTypeRequired: auction.vehicleTypeRequired,
-              }),
+              body: JSON.stringify(buildEmptyRouteMatchRequest(auction)),
             },
           );
           if (response.ok) {

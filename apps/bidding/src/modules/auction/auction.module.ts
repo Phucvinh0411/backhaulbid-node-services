@@ -32,6 +32,6 @@ import { AuctionNotificationClient } from '../../integrations/notifications/auct
     AuctionAwardService,
     AuctionNotificationClient,
   ],
-  exports: [AuctionService],
+  exports: [AuctionService, AuctionNotificationClient],
 })
 export class AuctionModule {}
