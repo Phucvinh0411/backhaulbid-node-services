@@ -128,15 +128,17 @@ export class BiddingGateway implements OnGatewayInit, OnModuleInit {
     if (isAdmin) {
       await socket.join(MONITOR_ROOM);
     }
-    return {
-      event: 'joinedAuction',
-      data: {
-        auctionId: payload.auctionId,
-        ...access,
-        carrierId: userId,
-        serverTime: new Date().toISOString(),
-      },
+    const joined = {
+      auctionId: payload.auctionId,
+      ...access,
+      carrierId: userId,
+      serverTime: new Date().toISOString(),
     };
+    // Returning { event, data } makes Nest emit an event and skip the ack, so clients
+    // waiting on the joinAuction callback never attach their room listeners.
+    // Answer through the ack and keep the joinedAuction event for listeners.
+    socket.emit('joinedAuction', joined);
+    return joined;
   }
 
   @SubscribeMessage('leaveAuction')
