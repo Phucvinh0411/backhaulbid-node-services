@@ -116,13 +116,13 @@ export class AuctionRegistrationService {
     if (registration.status === RegistrationStatus.CANCELLED) {
       throw new ConflictException('Registration is cancelled');
     }
+    if (registration.paymentStatus === RegistrationPaymentStatus.COMPLETED) {
+      return this.serialize(registration, auction);
+    }
     if (new Date() >= auction.startTime) {
       throw new ConflictException(
         'Payment retry is closed after the auction starts',
       );
-    }
-    if (registration.paymentStatus === RegistrationPaymentStatus.COMPLETED) {
-      return this.serialize(registration, auction);
     }
     return this.completePayment(registration, auction);
   }
