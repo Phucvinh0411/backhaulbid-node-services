@@ -28,7 +28,7 @@ async function bootstrap() {
         configService.get('RABBITMQ_URL') ??
           'amqp://guest:guest@localhost:5672',
       ],
-      queue: 'trip.milestone.reached.queue',
+      queue: 'trip.location.updated.queue',
       queueOptions: { durable: true },
       noAck: false,
     },
@@ -41,7 +41,7 @@ async function bootstrap() {
   logger.log(`🔔 Notification service running on port ${port}`);
   await app.startAllMicroservices();
   logger.log(
-    `🐇 RabbitMQ consumer connected — listening 'trip.milestone.reached.queue'`,
+    `🐇 RabbitMQ consumer connected — listening 'trip.location.updated.queue'`,
   );
 }
 void bootstrap();

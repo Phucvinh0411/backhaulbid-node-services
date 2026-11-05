@@ -7,7 +7,7 @@ import {
 import { NotificationService } from './notification.service.js';
 import { NotificationController } from './notification.controller.js';
 import { NotificationGateway } from './notification.gateway.js';
-import { MilestoneConsumer } from './milestone.consumer.js';
+import { TripLocationConsumer } from './trip-location.consumer.js';
 
 @Module({
   imports: [
@@ -15,7 +15,7 @@ import { MilestoneConsumer } from './milestone.consumer.js';
       { name: Notification.name, schema: NotificationSchema },
     ]),
   ],
-  controllers: [NotificationController, MilestoneConsumer],
+  controllers: [NotificationController, TripLocationConsumer],
   providers: [NotificationService, NotificationGateway],
   exports: [NotificationService],
 })

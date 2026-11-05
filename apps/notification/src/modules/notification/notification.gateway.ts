@@ -90,15 +90,10 @@ export class NotificationGateway
   }
 
   /**
-   * Emit event 'milestone_updated' tới room của một user cụ thể.
-   * Room name = userId (UUID string), được join tự động khi WS kết nối.
-   *
-   * @param userId  UUID của Shipper hoặc Carrier cần được notify
-   * @param payload Dữ liệu cột mốc đã đạt
+   * Emit event 'trip_location_updated' tới room của một user cụ thể (Shipper hoặc Carrier).
    */
-  public emitMilestoneUpdated(userId: string, payload: object): void {
-    this.logger.log(`[Socket.io] Emitting 'milestone_updated' to room: ${userId}`);
-    this.server.to(userId).emit('milestone_updated', payload);
+  public emitTripLocation(userId: string, payload: object): void {
+    this.server.to(userId).emit('trip_location_updated', payload);
   }
 }
 
