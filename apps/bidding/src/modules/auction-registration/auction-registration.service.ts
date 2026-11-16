@@ -25,6 +25,7 @@ import {
   CarrierReputationClient,
   MINIMUM_AUCTION_REPUTATION_SCORE,
 } from '../../integrations/fleet/carrier-reputation.client';
+import { EkycVerificationClient } from '../../integrations/identity/ekyc-verification.client';
 import {
   AuctionRegistration,
   AuctionRegistrationDocument,
@@ -40,6 +41,7 @@ export class AuctionRegistrationService {
     private readonly auctionService: AuctionService,
     private readonly walletClient: WalletClient,
     private readonly reputationClient: CarrierReputationClient,
+    private readonly ekycClient: EkycVerificationClient,
   ) {}
 
   async register(
@@ -49,6 +51,7 @@ export class AuctionRegistrationService {
   ) {
     const auction = await this.auctionService.findById(auctionId);
     this.assertRegistrationOpen(auction);
+    await this.ekycClient.assertCarrierVerified(carrierId);
     const reputationScore = await this.reputationClient.getScore(carrierId);
     if (reputationScore < MINIMUM_AUCTION_REPUTATION_SCORE) {
       throw new ForbiddenException({
@@ -108,6 +111,7 @@ export class AuctionRegistrationService {
     dto: RetryPaymentDto,
   ) {
     void dto;
+    await this.ekycClient.assertCarrierVerified(carrierId);
     const auction = await this.auctionService.findById(auctionId);
     const registration = await this.registrationModel
       .findOne({ _id: registrationId, auctionId, carrierId })
@@ -128,12 +132,24 @@ export class AuctionRegistrationService {
   }
 
   async getAccess(auctionId: string, carrierId: string) {
-    const auction = await this.auctionService.findById(auctionId);
-    const reputationScore = await this.reputationClient.getScore(carrierId);
+    const [auction, ekycVerified, reputationScore] = await Promise.all([
+      this.auctionService.findById(auctionId),
+      this.ekycClient.isVerified(carrierId),
+      this.reputationClient.getScore(carrierId),
+    ]);
     const reputation = {
+      ekycVerified,
       reputationScore,
       minimumReputationScore: MINIMUM_AUCTION_REPUTATION_SCORE,
     };
+    if (!ekycVerified) {
+      return {
+        canRegister: false,
+        canEnter: false,
+        accessStatus: 'EKYC_REQUIRED',
+        ...reputation,
+      };
+    }
     if (reputationScore < MINIMUM_AUCTION_REPUTATION_SCORE) {
       return {
         canRegister: false,
