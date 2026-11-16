@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AuctionModule } from '../auction/auction.module';
 import { WalletModule } from '../../integrations/wallet/wallet.module';
 import { FleetModule } from '../../integrations/fleet/fleet.module';
+import { IdentityModule } from '../../integrations/identity/identity.module';
 import { AuctionRegistrationController } from './auction-registration.controller';
 import { MyRegistrationsController } from './my-registrations.controller';
 import { AuctionRegistrationService } from './auction-registration.service';
@@ -16,6 +17,7 @@ import {
     AuctionModule,
     WalletModule,
     FleetModule,
+    IdentityModule,
     MongooseModule.forFeature([
       { name: AuctionRegistration.name, schema: AuctionRegistrationSchema },
     ]),

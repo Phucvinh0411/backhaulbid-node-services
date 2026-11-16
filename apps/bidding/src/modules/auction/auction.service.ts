@@ -36,6 +36,7 @@ import {
 } from '../bidding/bidding-events.service';
 import { AuctionAwardService } from './auction-award.service';
 import { MediaFileClient } from '../../integrations/media/media-file.client';
+import { EkycVerificationClient } from '../../integrations/identity/ekyc-verification.client';
 import { confirmedLocation } from '../../common/location-coordinates';
 
 @Injectable()
@@ -48,6 +49,7 @@ export class AuctionService {
     private readonly eventsService: BiddingEventsService,
     private readonly awardService: AuctionAwardService,
     private readonly mediaFiles: MediaFileClient,
+    private readonly ekycClient: EkycVerificationClient,
   ) {}
 
   async create(
@@ -55,6 +57,8 @@ export class AuctionService {
     dto: CreateAuctionDto,
     idempotencyKey?: string,
   ) {
+    await this.ekycClient.assertShipperVerified(shipperId);
+
     const creationIdempotencyKey = idempotencyKey?.trim() || undefined;
     if (creationIdempotencyKey) {
       const existing = await this.auctionRepo.findByIdempotencyKey(
