@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AuctionDocument } from './schemas/auction.schema';
+import { toAuctionResponse, toAuctionResponses } from './auction.mapper';
 import {
   ownerValueDocumentView,
   parseValueDocumentInputs,
@@ -271,7 +272,7 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
 
     await this.settleCreationFee(auction);
 
-    const serializedAuction = this.serialize(auction);
+    const serializedAuction = toAuctionResponse(auction);
 
     // Phát sự kiện để báo cho BiddingGateway thực hiện so khớp (matching) xe rỗng
     GlobalEventBus.emit('auction_created', serializedAuction);
@@ -282,11 +283,11 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
   private async returnExistingCreation(auction: AuctionDocument) {
     if (auction.creationFeeStatus !== CreationFeeStatus.SETTLED) {
       await this.settleCreationFee(auction);
-      const serializedAuction = this.serialize(auction);
+      const serializedAuction = toAuctionResponse(auction);
       GlobalEventBus.emit('auction_created', serializedAuction);
       return serializedAuction;
     }
-    return this.serialize(auction);
+    return toAuctionResponse(auction);
   }
 
   private async settleCreationFee(auction: AuctionDocument) {
@@ -338,7 +339,7 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
     ]);
 
     return {
-      data: items.map((item) => this.serialize(item)),
+      data: toAuctionResponses(items),
       pagination: {
         page: query.page,
         pageSize: query.pageSize,
@@ -350,7 +351,7 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
 
   async findById(auctionId: string) {
     const auction = await this.getAndSynchronizeStatus(auctionId);
-    return this.serialize(auction);
+    return toAuctionResponse(auction);
   }
 
   async findByIds(auctionIds: string[]) {
@@ -362,7 +363,7 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
     const synchronized = await Promise.all(
       docs.map((doc) => this.synchronizeAuctionDocument(doc)),
     );
-    return synchronized.map((doc) => this.serialize(doc));
+    return toAuctionResponses(synchronized);
   }
 
   async update(
@@ -482,7 +483,7 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
 
     const updated = await this.auctionRepo.updateById(auctionId, update);
     if (!updated) throw new NotFoundException('Auction not found');
-    return this.serialize(updated);
+    return toAuctionResponse(updated);
   }
 
   async open(auctionId: string, actorId: string, role: string) {
@@ -502,7 +503,7 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
     auction.status = AuctionStatus.OPEN;
     await auction.save();
     this.emitStatus(auction);
-    return this.serialize(auction);
+    return toAuctionResponse(auction);
   }
 
   async cancel(
@@ -523,7 +524,7 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
     await auction.save();
     await this.biddingSaga?.releaseCancelledAuctionDeposits(String(auction._id));
     this.emitStatus(auction);
-    return this.serialize(auction);
+    return toAuctionResponse(auction);
   }
 
   async complete(auctionId: string, actorId: string, role: string) {
@@ -532,7 +533,7 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
     if (auction.status !== AuctionStatus.OPEN) {
       if (auction.status === AuctionStatus.COMPLETED) {
         await this.ensureAward(auction);
-        return this.serialize(auction);
+        return toAuctionResponse(auction);
       }
       throw new ConflictException('Only open auctions can be completed');
     }
@@ -551,7 +552,7 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
     await auction.save();
     await this.awardService.createForWinner(auction, winningBid);
     this.emitStatus(auction, winningBid?.bidAmount?.toString() ?? null);
-    return this.serialize(auction);
+    return toAuctionResponse(auction);
   }
 
   async selectWinner(
@@ -582,7 +583,7 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
     await auction.save();
     await this.awardService.createForWinner(auction, winningBid);
     this.emitStatus(auction, winningBid.bidAmount.toString());
-    return this.serialize(auction);
+    return toAuctionResponse(auction);
   }
 
   async retryAward(auctionId: string, actorId: string, role: string) {
@@ -597,7 +598,7 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
       .exec();
     if (!winningBid) throw new NotFoundException('Winning bid not found');
     await this.awardService.createForWinner(auction, winningBid);
-    return this.serialize(auction);
+    return toAuctionResponse(auction);
   }
 
   /**
@@ -671,7 +672,7 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
     auction.fraudFlag = true;
     auction.fraudReason = dto.reason.trim();
     await auction.save();
-    return this.serialize(auction);
+    return toAuctionResponse(auction);
   }
 
   private emitStatus(
@@ -827,102 +828,5 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
         'Only the auction owner or an admin can perform this action',
       );
     }
-  }
-
-  private serialize(auction: AuctionDocument) {
-    const now = new Date();
-    return {
-      id: auction._id,
-      shipperId: auction.shipperId,
-      title: auction.title,
-      goodsType: auction.goodsType,
-      weight: auction.weight,
-      volume: auction.volume ?? null,
-      goodsValue: auction.goodsValue?.toString() ?? null,
-      vehicleTypeRequired: auction.vehicleTypeRequired,
-      requiredTemp: auction.requiredTemp ?? null,
-      vehicleSpecs: auction.vehicleSpecs ?? null,
-      requiredVehicleDims: auction.vehicleSpecs
-        ? {
-            length: auction.vehicleSpecs.length,
-            width: auction.vehicleSpecs.width,
-            height: auction.vehicleSpecs.height,
-          }
-        : null,
-      origin: auction.origin,
-      destination: auction.destination,
-      pickupLocation: auction.pickupLocation,
-      deliveryLocation: auction.deliveryLocation,
-      originLocationName: auction.pickupLocation?.locationName ?? null,
-      originAddress: auction.pickupLocation?.address ?? null,
-      originProvince: auction.pickupLocation?.province ?? null,
-      originContactName: auction.pickupLocation?.contactName ?? null,
-      originContactPhone: auction.pickupLocation?.contactPhone ?? null,
-      destinationLocationName: auction.deliveryLocation?.locationName ?? null,
-      destinationAddress: auction.deliveryLocation?.address ?? null,
-      destinationProvince: auction.deliveryLocation?.province ?? null,
-      destinationContactName: auction.deliveryLocation?.contactName ?? null,
-      destinationContactPhone: auction.deliveryLocation?.contactPhone ?? null,
-      earliestPickup: auction.pickupLocation?.earliestTime ?? null,
-      latestPickup: auction.pickupLocation?.latestTime ?? null,
-      earliestDelivery: auction.deliveryLocation?.earliestTime ?? null,
-      latestDelivery: auction.deliveryLocation?.latestTime ?? null,
-      auctionType: auction.auctionType,
-      requireCarrierCoverage: auction.requireCarrierCoverage === true,
-      maxPrice: auction.maxPrice.toString(),
-      priceStep: auction.priceStep ? auction.priceStep.toString() : null,
-      maxBids: auction.maxBids ?? null,
-      images: auction.images,
-      notes: auction.notes,
-      isDepositRequired: auction.isDepositRequired,
-      depositAmount: auction.depositAmount?.toString() ?? null,
-      participationFeeTier: auction.participationFeeTier,
-      participationFeeAmount: auction.participationFeeAmount.toString(),
-      creationFeeTier: auction.creationFeeTier || null,
-      creationFeeAmount: auction.creationFeeAmount
-        ? auction.creationFeeAmount.toString()
-        : null,
-      creationFeeStatus: auction.creationFeeStatus ?? null,
-      registrationStartTime: auction.registrationStartTime ?? null,
-      registrationEndTime: auction.registrationEndTime,
-      startTime: auction.startTime,
-      endTime: auction.endTime,
-      status: auction.status,
-      registrationOpen:
-        auction.status === AuctionStatus.PENDING &&
-        now < auction.registrationEndTime,
-      roomOpen:
-        auction.status === AuctionStatus.OPEN &&
-        now >= auction.startTime &&
-        now < auction.endTime,
-      winningBidId: auction.winningBidId ?? null,
-      awardStatus: auction.awardStatus ?? null,
-      awardTripId: auction.awardTripId ?? null,
-      awardError: auction.awardError ?? null,
-      awardProgress: this.serializeAwardProgress(auction),
-      cancellationReason: auction.cancellationReason ?? null,
-      fraudFlag: auction.fraudFlag ?? false,
-      fraudReason: auction.fraudReason ?? null,
-      createdAt: auction.createdAt,
-      updatedAt: auction.updatedAt,
-    };
-  }
-
-  private serializeAwardProgress(auction: AuctionDocument) {
-    const attempts = auction.awardAttempts ?? [];
-    const current = attempts.find((attempt) =>
-      [
-        'CREATING',
-        'CREATION_FAILED',
-        'AWAITING_CARRIER_SIGNATURE',
-        'AWAITING_SHIPPER_SIGNATURE',
-      ].includes(attempt.status),
-    );
-    return {
-      currentAttempt: current?.attemptNumber ?? attempts.length,
-      maximumAttempts: 1 + 3,
-      status: current?.status ?? auction.awardStatus ?? null,
-      signingDeadlineAt: current?.signingDeadlineAt ?? null,
-    };
   }
 }

@@ -35,6 +35,7 @@ import {
   AuctionRegistration,
   AuctionRegistrationDocument,
 } from './schemas/auction-registration.schema';
+import { toAuctionRegistrationResponse } from './auction-registration.mapper';
 
 type AuctionView = Awaited<ReturnType<AuctionService['findById']>>;
 
@@ -87,7 +88,7 @@ export class AuctionRegistrationService {
         );
       }
       if (existing.paymentStatus === RegistrationPaymentStatus.COMPLETED) {
-        return this.serialize(existing, auction);
+        return toAuctionRegistrationResponse(existing, auction);
       }
       await this.vehicleClient.assertVerifiedVehicle(carrierId, dto.vehicleId);
       if (existing.vehicleId !== dto.vehicleId) {
@@ -143,7 +144,7 @@ export class AuctionRegistrationService {
       );
     }
     if (registration.paymentStatus === RegistrationPaymentStatus.COMPLETED) {
-      return this.serialize(registration, auction);
+      return toAuctionRegistrationResponse(registration, auction);
     }
     if (new Date() >= auction.startTime) {
       throw new ConflictException(
@@ -386,7 +387,7 @@ export class AuctionRegistrationService {
         );
         const access = await this.getAccess(registration.auctionId, carrierId);
         return {
-          registration: this.serialize(registration, auction),
+          registration: toAuctionRegistrationResponse(registration, auction),
           auction,
           access,
         };
@@ -411,7 +412,7 @@ export class AuctionRegistrationService {
       .exec();
     if (!registration) throw new NotFoundException('Registration not found');
     if (registration.status === RegistrationStatus.CANCELLED) {
-      return this.serialize(registration, auction);
+      return toAuctionRegistrationResponse(registration, auction);
     }
 
     if (
@@ -426,7 +427,7 @@ export class AuctionRegistrationService {
     }
     registration.status = RegistrationStatus.CANCELLED;
     await registration.save();
-    return this.serialize(registration, auction);
+    return toAuctionRegistrationResponse(registration, auction);
   }
 
   async releaseLoserDeposits(auctionId: string, winningCarrierId?: string) {
@@ -536,7 +537,7 @@ export class AuctionRegistrationService {
       registration.paymentStatus = RegistrationPaymentStatus.COMPLETED;
       registration.paymentErrorCode = null;
       await registration.save();
-      return this.serialize(registration, auction);
+      return toAuctionRegistrationResponse(registration, auction);
     } catch (error) {
       let compensationPending = false;
       if (
@@ -610,29 +611,5 @@ export class AuctionRegistrationService {
       throw new ConflictException('Auction deposit configuration is invalid');
     }
     return auction.depositAmount;
-  }
-
-  private serialize(
-    registration: AuctionRegistrationDocument,
-    auction: AuctionView,
-  ) {
-    return {
-      id: registration._id,
-      auctionId: registration.auctionId,
-      carrierId: registration.carrierId,
-      vehicleId: registration.vehicleId,
-      status: registration.status,
-      paymentStatus: registration.paymentStatus,
-      depositStatus: registration.depositStatus,
-      participationFeeStatus: registration.participationFeeStatus,
-      participationFeeAmount: registration.participationFeeAmount.toString(),
-      depositAmount: registration.depositAmount?.toString() ?? null,
-      depositHoldId: registration.depositHoldId,
-      participationFeeTransactionId: registration.participationFeeTransactionId,
-      paymentErrorCode: registration.paymentErrorCode,
-      startTime: auction.startTime,
-      registeredAt: registration.registeredAt ?? registration.createdAt,
-      updatedAt: registration.updatedAt,
-    };
   }
 }

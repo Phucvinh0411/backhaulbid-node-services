@@ -10,6 +10,7 @@ import { CarrierCoverageClient } from '../../integrations/identity/carrier-cover
 import { ListBidsQueryDto } from './dto/list-bids-query.dto';
 import { PlaceBidDto } from './dto/place-bid.dto';
 import { Bid, BidDocument } from './schemas/bid.schema';
+import { toBidResponse, toBidResponses } from './bid.mapper';
 
 @Injectable()
 export class BidService {
@@ -32,7 +33,7 @@ export class BidService {
         const existing = await this.bidModel
           .findOne({ auctionId, carrierId, idempotencyKey })
           .exec();
-        if (existing) return this.serialize(existing);
+        if (existing) return toBidResponse(existing);
       }
 
       const access = await this.registrationService.getAccess(
@@ -100,7 +101,7 @@ export class BidService {
         bidTime: new Date(),
         idempotencyKey: idempotencyKey ?? null,
       });
-      return this.serialize(bid);
+      return toBidResponse(bid);
     });
   }
 
@@ -131,7 +132,7 @@ export class BidService {
       this.bidModel.countDocuments(filter).exec(),
     ]);
     return {
-      data: items.map((item) => this.serialize(item)),
+      data: toBidResponses(items),
       pagination: {
         page: query.page,
         pageSize: query.pageSize,
@@ -163,16 +164,5 @@ export class BidService {
         this.auctionLocks.delete(auctionId);
       }
     }
-  }
-
-  private serialize(bid: BidDocument) {
-    return {
-      id: bid._id,
-      auctionId: bid.auctionId,
-      carrierId: bid.carrierId,
-      bidAmount: bid.bidAmount.toString(),
-      bidTime: bid.bidTime,
-      idempotencyKey: bid.idempotencyKey ?? null,
-    };
   }
 }
