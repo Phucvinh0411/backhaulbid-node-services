@@ -9,7 +9,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
-import { NotificationDocument } from './schemas/notification.schema.js';
+import { NotificationResponseDto } from './notification.mapper.js';
 
 @WebSocketGateway({
   cors: {
@@ -79,12 +79,12 @@ export class NotificationGateway
     client.join(userId);
   }
 
-  public notifyUser(userId: string, notification: NotificationDocument) {
+  public notifyUser(userId: string, notification: NotificationResponseDto) {
     this.logger.log(`Sending real-time notification to user ${userId}`);
     this.server.to(userId).emit('new_notification', notification);
   }
 
-  public notifyAll(notification: NotificationDocument) {
+  public notifyAll(notification: NotificationResponseDto) {
     this.logger.log(`Broadcasting real-time notification to all users`);
     this.server.emit('new_notification', notification);
   }

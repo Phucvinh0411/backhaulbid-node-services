@@ -7,6 +7,11 @@ import {
 } from './schemas/notification.schema.js';
 import { CreateNotificationDto } from './dto/create-notification.dto.js';
 import { NotificationGateway } from './notification.gateway.js';
+import {
+  NotificationResponseDto,
+  toNotificationResponse,
+  toNotificationResponses,
+} from './notification.mapper.js';
 
 @Injectable()
 export class NotificationService {
@@ -18,7 +23,7 @@ export class NotificationService {
     private readonly notificationGateway: NotificationGateway,
   ) {}
 
-  async create(dto: CreateNotificationDto): Promise<NotificationDocument> {
+  async create(dto: CreateNotificationDto): Promise<NotificationResponseDto> {
     const notification = new this.notificationModel({
       userId: dto.userId,
       title: dto.title,
@@ -34,7 +39,7 @@ export class NotificationService {
     } catch (error) {
       if (dto.dedupeKey && (error as { code?: number }).code === 11000) {
         const existing = await this.notificationModel.findOne({ dedupeKey: dto.dedupeKey }).exec();
-        if (existing) return existing;
+        if (existing) return toNotificationResponse(existing);
       }
       throw error;
     }
@@ -42,18 +47,21 @@ export class NotificationService {
       `Notification created for user ${dto.userId}: ${dto.title}`,
     );
 
-    // Broadcast via WebSocket
-    this.notificationGateway.notifyUser(dto.userId, saved);
+    const response = toNotificationResponse(saved);
 
-    return saved;
+    // Broadcast via WebSocket
+    this.notificationGateway.notifyUser(dto.userId, response);
+
+    return response;
   }
 
-  async findByUserId(userId: string): Promise<NotificationDocument[]> {
-    return this.notificationModel
+  async findByUserId(userId: string): Promise<NotificationResponseDto[]> {
+    const docs = await this.notificationModel
       .find({ userId })
       .sort({ createdAt: -1 })
       .limit(50)
       .exec();
+    return toNotificationResponses(docs);
   }
 
   async markAllAsRead(userId: string): Promise<number> {
