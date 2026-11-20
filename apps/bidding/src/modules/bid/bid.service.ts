@@ -5,8 +5,8 @@ import { AuctionService } from '../auction/auction.service';
 import { AuctionStatus } from '../../common/enums/auction-status.enum';
 import { AuctionType } from '../../common/enums/auction-type.enum';
 import { AuctionRegistrationService } from '../auction-registration/auction-registration.service';
+import { AccountVerificationClient } from '../../integrations/identity/account-verification.client';
 import { CarrierCoverageClient } from '../../integrations/identity/carrier-coverage.client';
-import { EkycVerificationClient } from '../../integrations/identity/ekyc-verification.client';
 import { ListBidsQueryDto } from './dto/list-bids-query.dto';
 import { PlaceBidDto } from './dto/place-bid.dto';
 import { Bid, BidDocument } from './schemas/bid.schema';
@@ -21,12 +21,12 @@ export class BidService {
     private readonly auctionService: AuctionService,
     private readonly registrationService: AuctionRegistrationService,
     private readonly coverageClient: CarrierCoverageClient,
-    private readonly ekycClient: EkycVerificationClient,
+    private readonly verificationClient: AccountVerificationClient,
   ) {}
 
   async place(auctionId: string, carrierId: string, dto: PlaceBidDto) {
     return this.withAuctionLock(auctionId, async () => {
-      await this.ekycClient.assertCarrierVerified(carrierId);
+      await this.verificationClient.assertVerified(carrierId);
       const idempotencyKey = dto.idempotencyKey?.trim();
       if (idempotencyKey) {
         const existing = await this.bidModel

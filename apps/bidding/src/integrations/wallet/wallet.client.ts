@@ -11,11 +11,13 @@ export interface WalletOperationInput {
 
 export interface WalletOperationResult {
   status: string;
-  transactionId: string;
+  transactionId: string | null;
   holdId?: string;
   amount: string;
   message?: string;
 }
+
+const WALLET_REQUEST_TIMEOUT_MS = 10_000;
 
 export class WalletClientError extends Error {
   constructor(
@@ -64,6 +66,13 @@ export class WalletClient {
     });
   }
 
+  releaseByHoldKey(holdIdempotencyKey: string, idempotencyKey: string) {
+    return this.request(`/internal/wallet-holds/release-by-key`, {
+      holdIdempotencyKey,
+      idempotencyKey,
+    });
+  }
+
   forfeit(holdId: string, idempotencyKey: string) {
     return this.request(`/internal/wallet-holds/${holdId}/forfeit`, {
       idempotencyKey,
@@ -84,6 +93,7 @@ export class WalletClient {
             ? { 'x-internal-token': this.internalToken }
             : {}),
         },
+        signal: AbortSignal.timeout(WALLET_REQUEST_TIMEOUT_MS),
         body: JSON.stringify(body),
       });
     } catch (error) {
@@ -106,11 +116,14 @@ export class WalletClient {
         response.status,
       );
     }
-    if (!payload.transactionId || !payload.status) {
+    if (!payload.status || (payload.status !== 'NO_OP' && !payload.transactionId)) {
       throw new ServiceUnavailableException(
         'Wallet service returned an invalid response',
       );
     }
-    return payload as WalletOperationResult;
+    return {
+      ...payload,
+      transactionId: payload.transactionId ?? null,
+    } as WalletOperationResult;
   }
 }

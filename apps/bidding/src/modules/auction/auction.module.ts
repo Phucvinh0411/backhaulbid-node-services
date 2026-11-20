@@ -3,7 +3,12 @@ import { AuctionController } from './auction.controller';
 import { AuctionService } from './auction.service';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Auction, AuctionSchema } from './schemas/auction.schema';
+import {
+  WalletHoldSaga,
+  WalletHoldSagaSchema,
+} from './schemas/wallet-hold-saga.schema';
 import { AuctionRepository } from './auction.repository';
+import { ContractAwardConsumer } from './contract-award.consumer';
 
 import { Bid, BidSchema } from '../bid/schemas/bid.schema';
 import { BiddingEventsModule } from '../bidding/bidding-events.module';
@@ -13,6 +18,7 @@ import { ContractsModule } from '../../integrations/contracts/contracts.module';
 import { MediaModule } from '../../integrations/media/media.module';
 import { IdentityModule } from '../../integrations/identity/identity.module';
 import { AuctionAwardService } from './auction-award.service';
+import { BiddingSagaService } from './bidding-saga.service';
 import { AuctionRegistration, AuctionRegistrationSchema } from '../auction-registration/schemas/auction-registration.schema';
 import { AuctionNotificationClient } from '../../integrations/notifications/auction-notification.client';
 
@@ -20,6 +26,7 @@ import { AuctionNotificationClient } from '../../integrations/notifications/auct
   imports: [
     MongooseModule.forFeature([
       { name: Auction.name, schema: AuctionSchema },
+      { name: WalletHoldSaga.name, schema: WalletHoldSagaSchema },
       { name: Bid.name, schema: BidSchema },
       { name: AuctionRegistration.name, schema: AuctionRegistrationSchema },
     ]),
@@ -29,13 +36,14 @@ import { AuctionNotificationClient } from '../../integrations/notifications/auct
     IdentityModule,
     BiddingEventsModule,
   ],
-  controllers: [AuctionController],
+  controllers: [AuctionController, ContractAwardConsumer],
   providers: [
     AuctionRepository,
     AuctionService,
     AuctionAwardService,
+    BiddingSagaService,
     AuctionNotificationClient,
   ],
-  exports: [AuctionService, AuctionNotificationClient],
+  exports: [AuctionService, BiddingSagaService, AuctionNotificationClient],
 })
 export class AuctionModule {}

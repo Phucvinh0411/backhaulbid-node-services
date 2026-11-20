@@ -194,6 +194,12 @@ export class Auction {
   @Prop({ type: String, default: null })
   creationFeeTransactionId!: string | null;
 
+  @Prop({ type: Number, default: 0 })
+  creationFeeRetryCount!: number;
+
+  @Prop({ type: Date, default: null })
+  creationFeeLastAttemptAt!: Date | null;
+
   @Prop({ type: Date, default: null })
   registrationStartTime!: Date | null;
 
@@ -258,3 +264,5 @@ AuctionSchema.index(
 );
 AuctionSchema.index({ status: 1, startTime: 1 });
 AuctionSchema.index({ status: 1, endTime: 1 });
+AuctionSchema.index({ 'awardAttempts.attemptId': 1 });
+AuctionSchema.index({ creationFeeStatus: 1, creationFeeRetryCount: 1, createdAt: 1 });

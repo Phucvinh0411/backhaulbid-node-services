@@ -1,5 +1,6 @@
 import {
   Controller,
+  ForbiddenException,
   Get,
   Headers,
   Query,
@@ -16,6 +17,32 @@ export class MyRegistrationsController {
   constructor(
     private readonly auctionRegistrationService: AuctionRegistrationService,
   ) {}
+
+  @Get('access')
+  batchAccess(
+    @Headers('x-user-id') carrierId: string | undefined,
+    @Headers('x-user-role') role: string | undefined,
+    @Query('auctionIds') auctionIds?: string | string[],
+  ) {
+    if (!carrierId)
+      throw new UnauthorizedException('Authenticated carrier is required');
+    if ((role || '').toUpperCase() !== 'CARRIER') {
+      throw new ForbiddenException('Required role: CARRIER');
+    }
+    const raw = Array.isArray(auctionIds)
+      ? auctionIds.join(',')
+      : (auctionIds ?? '');
+    const ids = Array.from(
+      new Set(
+        raw
+          .split(',')
+          .map((id) => id.trim())
+          .filter((id) => id.length > 0),
+      ),
+    ).slice(0, 200);
+    if (ids.length === 0) return {};
+    return this.auctionRegistrationService.getBatchAccess(ids, carrierId);
+  }
 
   @Get()
   list(

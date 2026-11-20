@@ -60,6 +60,9 @@ export class AuctionRegistration {
   @Prop({ type: String, default: null })
   paymentErrorCode!: string | null;
 
+  @Prop({ type: Number, default: 0 })
+  paymentAttempt?: number;
+
   registeredAt!: Date;
   createdAt!: Date;
   updatedAt!: Date;
@@ -73,3 +76,5 @@ AuctionRegistrationSchema.index(
 );
 AuctionRegistrationSchema.index({ auctionId: 1, status: 1 });
 AuctionRegistrationSchema.index({ carrierId: 1, status: 1 });
+AuctionRegistrationSchema.index({ paymentStatus: 1, depositStatus: 1, updatedAt: 1 });
+AuctionRegistrationSchema.index({ auctionId: 1, depositStatus: 1 });

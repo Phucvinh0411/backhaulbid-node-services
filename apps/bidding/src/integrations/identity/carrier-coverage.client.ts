@@ -1,5 +1,11 @@
-import { ForbiddenException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { RedisCacheService } from '../../common/redis/redis-cache.service';
 
 export const CARGO_COVERAGE_REQUIRED_MESSAGE =
   'Đấu giá này yêu cầu nhà xe có chứng từ bảo hiểm trách nhiệm hàng hóa còn hiệu lực đã được xác minh';
@@ -17,36 +23,48 @@ export class CarrierCoverageClient {
   private readonly baseUrl: string;
   private readonly internalToken: string;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    @Optional() private readonly cache?: RedisCacheService,
+  ) {
     this.baseUrl = config.getOrThrow<string>('IDENTITY_SERVICE_URL').replace(/\/$/, '');
     this.internalToken = config.getOrThrow<string>('INTERNAL_SERVICE_TOKEN');
   }
 
   async isEligible(carrierId: string): Promise<boolean> {
-    let response: Response;
-    try {
-      response = await fetch(
-        `${this.baseUrl}/internal/cargo-liability/accounts/${encodeURIComponent(carrierId)}/eligibility`,
-        {
-          headers: { 'x-internal-token': this.internalToken },
-          signal: AbortSignal.timeout(5000),
-        },
-      );
-    } catch (error) {
-      throw new ServiceUnavailableException(
-        `Identity service is unavailable: ${error instanceof Error ? error.message : 'network error'}`,
-      );
-    }
+    const fetchEligible = async (): Promise<boolean> => {
+      let response: Response;
+      try {
+        response = await fetch(
+          `${this.baseUrl}/internal/cargo-liability/accounts/${encodeURIComponent(carrierId)}/eligibility`,
+          {
+            headers: { 'x-internal-token': this.internalToken },
+            signal: AbortSignal.timeout(5000),
+          },
+        );
+      } catch (error) {
+        throw new ServiceUnavailableException(
+          `Identity service is unavailable: ${error instanceof Error ? error.message : 'network error'}`,
+        );
+      }
 
-    const payload = (await response.json().catch(() => ({}))) as Partial<CarrierCoverageStatus> & {
-      message?: string;
+      const payload = (await response.json().catch(() => ({}))) as Partial<CarrierCoverageStatus> & {
+        message?: string;
+      };
+      if (!response.ok || typeof payload.eligible !== 'boolean') {
+        throw new ServiceUnavailableException(
+          payload.message ?? 'Identity service returned an invalid coverage status',
+        );
+      }
+      return payload.eligible;
     };
-    if (!response.ok || typeof payload.eligible !== 'boolean') {
-      throw new ServiceUnavailableException(
-        payload.message ?? 'Identity service returned an invalid coverage status',
-      );
-    }
-    return payload.eligible;
+
+    if (!this.cache) return fetchEligible();
+    return this.cache.getOrSet(
+      `bidding:coverage:${carrierId}`,
+      30_000,
+      fetchEligible,
+    );
   }
 
   async assertEligible(carrierId: string): Promise<void> {

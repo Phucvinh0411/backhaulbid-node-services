@@ -8,6 +8,7 @@ import {
   WsException,
 } from '@nestjs/websockets';
 import { OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { Server, Socket } from 'socket.io';
 import { AuctionRegistrationService } from '../auction-registration/auction-registration.service';
 import { AuctionService } from '../auction/auction.service';
@@ -15,6 +16,7 @@ import { BidService } from '../bid/bid.service';
 import { BiddingEventsService, MONITOR_ROOM } from './bidding-events.service';
 import { GlobalEventBus } from '../../common/events';
 import { AuctionNotificationClient } from '../../integrations/notifications/auction-notification.client';
+import { AccountVerificationClient } from '../../integrations/identity/account-verification.client';
 import { buildEmptyRouteMatchRequest } from './empty-route-matching';
 
 interface JoinAuctionPayload {
@@ -51,20 +53,30 @@ export class BiddingGateway implements OnGatewayInit, OnModuleInit {
   @WebSocketServer()
   server!: Server;
 
+  private readonly fleetServiceUrl: string;
+  private readonly internalToken: string;
+
   constructor(
     private readonly registrationService: AuctionRegistrationService,
     private readonly auctionService: AuctionService,
     private readonly bidService: BidService,
     private readonly eventsService: BiddingEventsService,
     private readonly notificationClient: AuctionNotificationClient,
-  ) {}
+    private readonly verificationClient: AccountVerificationClient,
+    config: ConfigService,
+  ) {
+    this.fleetServiceUrl = (
+      config.get<string>('FLEET_SERVICE_URL') ?? 'http://fleet-service:8080'
+    ).replace(/\/$/, '');
+    this.internalToken = config.get<string>('INTERNAL_SERVICE_TOKEN') ?? '';
+  }
 
   afterInit(server: Server): void {
     this.eventsService.attachServer(server);
   }
 
   @SubscribeMessage('register_device')
-  handleRegisterDevice(
+  async handleRegisterDevice(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: RegisterDevicePayload,
   ) {
@@ -75,6 +87,12 @@ export class BiddingGateway implements OnGatewayInit, OnModuleInit {
     }
     if (!['CARRIER', 'ADMIN'].includes(role)) {
       throw new WsException('Only carriers or admins can register devices');
+    }
+    if (role !== 'ADMIN') {
+      const verified = await this.verificationClient.isVerified(userId);
+      if (!verified) {
+        throw new WsException('ACCOUNT_VERIFICATION_REQUIRED');
+      }
     }
 
     const targetCompanyId = (payload?.companyId || '').trim();
@@ -237,14 +255,15 @@ export class BiddingGateway implements OnGatewayInit, OnModuleInit {
     GlobalEventBus.on('auction_created', (auction) => {
       void (async () => {
         try {
-          const fleetServiceUrl =
-            process.env.FLEET_SERVICE_URL ||
-            'http://backhaulbid-fleet-service:8080';
           const response = await fetch(
-            `${fleetServiceUrl}/internal/empty-routes/match`,
+            `${this.fleetServiceUrl}/internal/empty-routes/match`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'x-internal-token': this.internalToken,
+              },
+              signal: AbortSignal.timeout(5000),
               body: JSON.stringify(buildEmptyRouteMatchRequest(auction)),
             },
           );

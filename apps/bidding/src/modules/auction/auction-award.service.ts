@@ -1,10 +1,11 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import { DepositStatus } from '../../common/enums/deposit-status.enum';
 import { RegistrationPaymentStatus } from '../../common/enums/registration-payment-status.enum';
 import { CreationFeeStatus } from '../../common/enums/creation-fee-status.enum';
+import { RedisCacheService } from '../../common/redis/redis-cache.service';
 import { WalletClient } from '../../integrations/wallet/wallet.client';
 import { ContractAwardClient, ContractRoutePoint } from '../../integrations/contracts/contract-award.client';
 import { LocationDetail } from '../../common/schemas/location.schema';
@@ -30,6 +31,7 @@ const AWARD_POLL_INTERVAL_MS = 30_000;
 export class AuctionAwardService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AuctionAwardService.name);
   private pollTimer: NodeJS.Timeout | undefined;
+  private readonly reconcilingAuctionIds = new Set<string>();
 
   constructor(
     @InjectModel(Auction.name)
@@ -41,6 +43,7 @@ export class AuctionAwardService implements OnModuleInit, OnModuleDestroy {
     private readonly contractAwardClient: ContractAwardClient,
     private readonly walletClient: WalletClient,
     private readonly notificationClient: AuctionNotificationClient,
+    @Optional() private readonly redis?: RedisCacheService,
   ) {}
 
   onModuleInit() {
@@ -154,62 +157,90 @@ export class AuctionAwardService implements OnModuleInit, OnModuleDestroy {
       .exec();
 
     for (const auction of auctions) {
-      try {
-        const index = auction.awardAttempts.findIndex((attempt) =>
-          [
-            AuctionAwardAttemptStatus.CREATING,
-            AuctionAwardAttemptStatus.CREATION_FAILED,
-            AuctionAwardAttemptStatus.AWAITING_CARRIER_SIGNATURE,
-            AuctionAwardAttemptStatus.AWAITING_SHIPPER_SIGNATURE,
-          ].includes(attempt.status),
-        );
-        if (index < 0) continue;
-        const attempt = auction.awardAttempts[index];
-
-        if (
-          attempt.status === AuctionAwardAttemptStatus.CREATION_FAILED ||
-          attempt.status === AuctionAwardAttemptStatus.CREATING
-        ) {
-          await this.startAttempt(auction, index);
-          continue;
-        }
-        if (!attempt.contractId) continue;
-
-        let status = await this.contractAwardClient.status(attempt.attemptId);
-        if (status.status === 'SIGNED') {
-          await this.finishSignedAttempt(auction, attempt);
-          continue;
-        }
-
-        if (status.carrierSigned && !status.shipperSigned) {
-          if (attempt.status !== AuctionAwardAttemptStatus.AWAITING_SHIPPER_SIGNATURE) {
-            attempt.status = AuctionAwardAttemptStatus.AWAITING_SHIPPER_SIGNATURE;
-            attempt.signingDeadlineAt = status.signingDeadlineAt
-              ? new Date(status.signingDeadlineAt)
-              : null;
-            await auction.save();
-            await this.notifyShipperSignatureRequired(auction, attempt);
-          }
-        }
-
-        const deadline = status.signingDeadlineAt
-          ? new Date(status.signingDeadlineAt)
-          : attempt.signingDeadlineAt;
-        if (status.status === 'EXPIRED' || (deadline && deadline.getTime() <= Date.now())) {
-          status = await this.contractAwardClient.expire(attempt.attemptId);
-          if (status.status === 'EXPIRED' || status.status === 'CANCELLED') {
-            await this.finishExpiredAttempt(auction, attempt, status.carrierSigned);
-          }
-        }
-      } catch (error) {
-        this.logger.warn(
-          `Unable to process award ${auction._id}: ${this.errorMessage(error)}`,
-        );
-      }
+      await this.reconcileAuctionAward(auction);
     }
 
     await this.retryExpiredCarrierDeposits();
     await this.retryTerminalActions();
+  }
+
+  async handleAwardAttemptEvent(awardAttemptId: string): Promise<void> {
+    const auction = await this.auctionModel
+      .findOne({ 'awardAttempts.attemptId': awardAttemptId })
+      .exec();
+    if (!auction) return;
+    await this.reconcileAuctionAward(auction);
+  }
+
+  async reconcileAuctionAward(auction: AuctionDocument): Promise<void> {
+    const auctionId = String(auction._id);
+    if (this.reconcilingAuctionIds.has(auctionId)) return;
+    this.reconcilingAuctionIds.add(auctionId);
+    const lockKey = `bidding:award:lock:${auctionId}`;
+    const lockToken = randomUUID();
+    let redisLockAcquired = false;
+
+    try {
+      redisLockAcquired =
+        (await this.redis?.tryAcquireLock(lockKey, lockToken, 20_000)) ?? true;
+      if (!redisLockAcquired) return;
+
+      const index = auction.awardAttempts.findIndex((attempt) =>
+        [
+          AuctionAwardAttemptStatus.CREATING,
+          AuctionAwardAttemptStatus.CREATION_FAILED,
+          AuctionAwardAttemptStatus.AWAITING_CARRIER_SIGNATURE,
+          AuctionAwardAttemptStatus.AWAITING_SHIPPER_SIGNATURE,
+        ].includes(attempt.status),
+      );
+      if (index < 0) return;
+      const attempt = auction.awardAttempts[index];
+
+      if (
+        attempt.status === AuctionAwardAttemptStatus.CREATION_FAILED ||
+        attempt.status === AuctionAwardAttemptStatus.CREATING
+      ) {
+        await this.startAttempt(auction, index);
+        return;
+      }
+      if (!attempt.contractId) return;
+
+      let status = await this.contractAwardClient.status(attempt.attemptId);
+      if (status.status === 'SIGNED') {
+        await this.finishSignedAttempt(auction, attempt);
+        return;
+      }
+
+      if (status.carrierSigned && !status.shipperSigned) {
+        if (attempt.status !== AuctionAwardAttemptStatus.AWAITING_SHIPPER_SIGNATURE) {
+          attempt.status = AuctionAwardAttemptStatus.AWAITING_SHIPPER_SIGNATURE;
+          attempt.signingDeadlineAt = status.signingDeadlineAt
+            ? new Date(status.signingDeadlineAt)
+            : null;
+          await auction.save();
+          await this.notifyShipperSignatureRequired(auction, attempt);
+        }
+      }
+
+      const deadline = status.signingDeadlineAt
+        ? new Date(status.signingDeadlineAt)
+        : attempt.signingDeadlineAt;
+      if (status.status === 'EXPIRED' || (deadline && deadline.getTime() <= Date.now())) {
+        status = await this.contractAwardClient.expire(attempt.attemptId);
+        if (status.status === 'EXPIRED' || status.status === 'CANCELLED') {
+          await this.finishExpiredAttempt(auction, attempt, status.carrierSigned);
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Unable to process award ${auction._id}: ${this.errorMessage(error)}`,
+      );
+    } finally {
+      if (redisLockAcquired) {
+        await this.redis?.releaseLock(lockKey, lockToken);
+      }
+      this.reconcilingAuctionIds.delete(auctionId);
+    }
   }
 
   private async retryExpiredCarrierDeposits() {

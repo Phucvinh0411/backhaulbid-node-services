@@ -1,5 +1,11 @@
-import { ForbiddenException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { RedisCacheService } from '../../common/redis/redis-cache.service';
 
 export const MINIMUM_AUCTION_REPUTATION_SCORE = 70;
 
@@ -13,29 +19,41 @@ export class CarrierReputationClient {
   private readonly baseUrl: string;
   private readonly internalToken: string;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    @Optional() private readonly cache?: RedisCacheService,
+  ) {
     this.baseUrl = config.getOrThrow<string>('FLEET_SERVICE_URL').replace(/\/$/, '');
     this.internalToken = config.getOrThrow<string>('INTERNAL_SERVICE_TOKEN');
   }
 
   async getScore(carrierId: string): Promise<number> {
-    let response: Response;
-    try {
-      response = await fetch(`${this.baseUrl}/internal/carrier-reputations/${carrierId}`, {
-        headers: { 'x-internal-token': this.internalToken },
-        signal: AbortSignal.timeout(5000),
-      });
-    } catch (error) {
-      throw new ServiceUnavailableException(
-        `Fleet service is unavailable: ${error instanceof Error ? error.message : 'network error'}`,
-      );
-    }
+    const fetchScore = async (): Promise<number> => {
+      let response: Response;
+      try {
+        response = await fetch(`${this.baseUrl}/internal/carrier-reputations/${carrierId}`, {
+          headers: { 'x-internal-token': this.internalToken },
+          signal: AbortSignal.timeout(5000),
+        });
+      } catch (error) {
+        throw new ServiceUnavailableException(
+          `Fleet service is unavailable: ${error instanceof Error ? error.message : 'network error'}`,
+        );
+      }
 
-    const payload = (await response.json().catch(() => ({}))) as Partial<CarrierReputation> & { message?: string };
-    if (!response.ok || typeof payload.score !== 'number') {
-      throw new ServiceUnavailableException(payload.message ?? 'Fleet service returned an invalid reputation score');
-    }
-    return payload.score;
+      const payload = (await response.json().catch(() => ({}))) as Partial<CarrierReputation> & { message?: string };
+      if (!response.ok || typeof payload.score !== 'number') {
+        throw new ServiceUnavailableException(payload.message ?? 'Fleet service returned an invalid reputation score');
+      }
+      return payload.score;
+    };
+
+    if (!this.cache) return fetchScore();
+    return this.cache.getOrSet(
+      `bidding:rep:${carrierId}`,
+      30_000,
+      fetchScore,
+    );
   }
 
   async assertEligible(carrierId: string): Promise<number> {

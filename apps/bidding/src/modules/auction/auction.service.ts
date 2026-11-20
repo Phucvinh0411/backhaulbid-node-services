@@ -3,7 +3,11 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -27,7 +31,10 @@ import { AuctionStatus } from '../../common/enums/auction-status.enum';
 import { AuctionType } from '../../common/enums/auction-type.enum';
 import { CreationFeeStatus } from '../../common/enums/creation-fee-status.enum';
 import { calculateParticipationFee, calculateCreationFee } from './fee-policy';
-import { WalletClient } from '../../integrations/wallet/wallet.client';
+import {
+  WalletClient,
+  WalletClientError,
+} from '../../integrations/wallet/wallet.client';
 import { Bid, BidDocument } from '../bid/schemas/bid.schema';
 import { GlobalEventBus } from '../../common/events';
 import {
@@ -35,12 +42,17 @@ import {
   BiddingEventsService,
 } from '../bidding/bidding-events.service';
 import { AuctionAwardService } from './auction-award.service';
+import { BiddingSagaService } from './bidding-saga.service';
 import { MediaFileClient } from '../../integrations/media/media-file.client';
-import { EkycVerificationClient } from '../../integrations/identity/ekyc-verification.client';
+import { AccountVerificationClient } from '../../integrations/identity/account-verification.client';
 import { confirmedLocation } from '../../common/location-coordinates';
 
 @Injectable()
-export class AuctionService {
+export class AuctionService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(AuctionService.name);
+  private dueAuctionsInterval: NodeJS.Timeout | null = null;
+  private synchronizingDueAuctions = false;
+
   constructor(
     private readonly auctionRepo: AuctionRepository,
     @InjectModel(Bid.name)
@@ -49,16 +61,65 @@ export class AuctionService {
     private readonly eventsService: BiddingEventsService,
     private readonly awardService: AuctionAwardService,
     private readonly mediaFiles: MediaFileClient,
-    private readonly ekycClient: EkycVerificationClient,
+    private readonly verificationClient: AccountVerificationClient,
+    @Optional()
+    private readonly biddingSaga?: BiddingSagaService,
   ) {}
+
+  onModuleInit(): void {
+    this.scheduleDueAuctionSynchronization();
+    this.dueAuctionsInterval = setInterval(
+      () => this.scheduleDueAuctionSynchronization(),
+      5_000,
+    );
+    this.dueAuctionsInterval.unref?.();
+  }
+
+  onModuleDestroy(): void {
+    if (this.dueAuctionsInterval) clearInterval(this.dueAuctionsInterval);
+  }
+
+  private scheduleDueAuctionSynchronization(): void {
+    void this.synchronizeDueAuctions().catch((error: unknown) => {
+      this.logger.error(
+        'Could not synchronize due auctions',
+        error instanceof Error ? error.stack : String(error),
+      );
+    });
+  }
+
+  private async synchronizeDueAuctions(): Promise<void> {
+    if (this.synchronizingDueAuctions) return;
+    this.synchronizingDueAuctions = true;
+
+    const now = new Date();
+    const dueFilter = {
+      status: { $in: [AuctionStatus.PENDING, AuctionStatus.OPEN] },
+      $or: [
+        { endTime: { $lte: now } },
+        { status: AuctionStatus.PENDING, startTime: { $lte: now } },
+      ],
+    };
+
+    try {
+      let due = await this.auctionRepo.find(dueFilter, 0, 100);
+      while (due.length > 0) {
+        for (const auction of due) {
+          await this.getAndSynchronizeStatus(String(auction._id));
+        }
+        due = await this.auctionRepo.find(dueFilter, 0, 100);
+      }
+    } finally {
+      this.synchronizingDueAuctions = false;
+    }
+  }
 
   async create(
     shipperId: string,
     dto: CreateAuctionDto,
     idempotencyKey?: string,
   ) {
-    await this.ekycClient.assertShipperVerified(shipperId);
-
+    await this.verificationClient.assertVerified(shipperId);
     const creationIdempotencyKey = idempotencyKey?.trim() || undefined;
     if (creationIdempotencyKey) {
       const existing = await this.auctionRepo.findByIdempotencyKey(
@@ -105,18 +166,39 @@ export class AuctionService {
     const deliveryLocation = confirmedLocation(dto.deliveryLocation);
 
     const auctionId = randomUUID();
+    const holdKey = `auction_creation_fee_${auctionId}`;
 
-    const creationFeeHold = await this.walletClient.hold(shipperId, {
-      auctionId,
-      amount: creationFee.amount,
-      purpose: 'AUCTION_CREATION_FEE',
-      idempotencyKey: `auction_creation_fee_${auctionId}`,
-    });
+    await this.biddingSaga?.beginCreationFeeHold(holdKey, auctionId, shipperId);
+
+    let creationFeeHold: Awaited<ReturnType<WalletClient['hold']>>;
+    try {
+      creationFeeHold = await this.walletClient.hold(shipperId, {
+        auctionId,
+        amount: creationFee.amount,
+        purpose: 'AUCTION_CREATION_FEE',
+        idempotencyKey: holdKey,
+      });
+    } catch (error) {
+      if (
+        error instanceof WalletClientError &&
+        error.statusCode !== undefined &&
+        error.statusCode >= 400 &&
+        error.statusCode < 500
+      ) {
+        await this.biddingSaga?.markCreationFeeCompensated(holdKey);
+      }
+      throw error;
+    }
     if (!creationFeeHold.holdId) {
       throw new ServiceUnavailableException(
         'Wallet service did not return a valid creation fee hold',
       );
     }
+
+    await this.biddingSaga?.claimCreationFeeHoldForCommit(
+      holdKey,
+      creationFeeHold.holdId,
+    );
 
     let auction: AuctionDocument;
     try {
@@ -150,22 +232,40 @@ export class AuctionService {
         creationFeeTransactionId: null,
         status: AuctionStatus.PENDING,
       });
+      await this.biddingSaga?.markCreationFeeCommitted(
+        holdKey,
+        creationFeeHold.holdId,
+      );
     } catch (error) {
-      if (creationIdempotencyKey && this.isDuplicateKeyError(error)) {
+      const releaseReason =
+        creationIdempotencyKey && this.isDuplicateKeyError(error)
+          ? 'duplicate-release'
+          : 'release';
+      try {
         await this.walletClient.release(
           creationFeeHold.holdId,
-          `auction_creation_fee_${auctionId}:duplicate-release`,
+          `${holdKey}:${releaseReason}`,
         );
+        await this.biddingSaga?.markCreationFeeCompensated(
+          holdKey,
+          creationFeeHold.holdId,
+        );
+      } catch (releaseError) {
+        this.logger.warn(
+          `[CreationFeeSaga] Immediate release failed for ${holdKey}, queued for background compensation: ${releaseError instanceof Error ? releaseError.message : String(releaseError)}`,
+        );
+        await this.biddingSaga?.recordCreationFeeHoldId(
+          holdKey,
+          creationFeeHold.holdId,
+        );
+      }
+      if (creationIdempotencyKey && this.isDuplicateKeyError(error)) {
         const existing = await this.auctionRepo.findByIdempotencyKey(
           shipperId,
           creationIdempotencyKey,
         );
         if (existing) return this.returnExistingCreation(existing);
       }
-      await this.walletClient.release(
-        creationFeeHold.holdId,
-        `auction_creation_fee_${auctionId}:release`,
-      );
       throw error;
     }
 
@@ -190,6 +290,9 @@ export class AuctionService {
   }
 
   private async settleCreationFee(auction: AuctionDocument) {
+    if (this.biddingSaga) {
+      return this.biddingSaga.settleCreationFee(auction);
+    }
     if (auction.creationFeeStatus === CreationFeeStatus.SETTLED) return;
     if (!auction.creationFeeHoldId) {
       throw new Error('Auction creation fee hold is missing');
@@ -248,6 +351,18 @@ export class AuctionService {
   async findById(auctionId: string) {
     const auction = await this.getAndSynchronizeStatus(auctionId);
     return this.serialize(auction);
+  }
+
+  async findByIds(auctionIds: string[]) {
+    const uniqueIds = Array.from(
+      new Set(auctionIds.map((id) => id.trim()).filter((id) => id.length > 0)),
+    );
+    if (uniqueIds.length === 0) return [];
+    const docs = await this.auctionRepo.findByIds(uniqueIds);
+    const synchronized = await Promise.all(
+      docs.map((doc) => this.synchronizeAuctionDocument(doc)),
+    );
+    return synchronized.map((doc) => this.serialize(doc));
   }
 
   async update(
@@ -406,6 +521,7 @@ export class AuctionService {
     auction.status = AuctionStatus.CANCELLED;
     auction.cancellationReason = reason?.trim() || null;
     await auction.save();
+    await this.biddingSaga?.releaseCancelledAuctionDeposits(String(auction._id));
     this.emitStatus(auction);
     return this.serialize(auction);
   }
@@ -583,7 +699,13 @@ export class AuctionService {
   ): Promise<AuctionDocument> {
     const auction = await this.auctionRepo.findById(auctionId);
     if (!auction) throw new NotFoundException('Auction not found');
+    return this.synchronizeAuctionDocument(auction);
+  }
 
+  private async synchronizeAuctionDocument(
+    auction: AuctionDocument,
+  ): Promise<AuctionDocument> {
+    const previousStatus = auction.status;
     const now = new Date();
     let shouldSave = false;
     if (!auction.creationFeeTier || !auction.creationFeeAmount) {
@@ -634,6 +756,9 @@ export class AuctionService {
       shouldSave = true;
     }
     if (shouldSave) await auction.save();
+    if (shouldSave && auction.status !== previousStatus) {
+      this.emitStatus(auction);
+    }
     if (shouldSave && auction.status === AuctionStatus.COMPLETED) {
       await this.ensureAward(auction);
     }

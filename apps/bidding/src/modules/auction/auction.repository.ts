@@ -26,6 +26,11 @@ export class AuctionRepository {
     return this.model.findById(id).exec();
   }
 
+  async findByIds(ids: string[]): Promise<AuctionDocument[]> {
+    if (ids.length === 0) return [];
+    return this.model.find({ _id: { $in: ids } }).exec();
+  }
+
   async find(
     filter: Record<string, any>,
     skip = 0,
