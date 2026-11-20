@@ -557,7 +557,39 @@ export class AuctionRegistrationService {
           registration.paymentErrorCode = 'DEPOSIT_COMPENSATION_PENDING';
         }
       }
-      await this.markFailed(registration, error, compensationPending);
+
+      let feeCompensationPending = false;
+      if (registration.participationFeeStatus === ParticipationFeeStatus.PAID) {
+        const refundKey = registration.participationFeeTransactionId
+          ? `${registration._id}:fee:refund:${registration.participationFeeTransactionId}`
+          : `${registration._id}:fee:refund${keySuffix}`;
+        const feeAmount =
+          registration.participationFeeAmount?.toString() ||
+          auction.participationFeeAmount;
+        try {
+          await this.walletClient.refund(registration.carrierId, {
+            auctionId: registration.auctionId,
+            registrationId: registration._id,
+            amount: feeAmount,
+            purpose: 'AUCTION_PARTICIPATION_FEE_REFUND',
+            idempotencyKey: refundKey,
+          });
+          registration.participationFeeStatus =
+            ParticipationFeeStatus.COMPENSATED;
+        } catch {
+          feeCompensationPending = true;
+          if (!compensationPending) {
+            registration.paymentErrorCode =
+              'PARTICIPATION_FEE_COMPENSATION_PENDING';
+          }
+        }
+      }
+
+      await this.markFailed(
+        registration,
+        error,
+        compensationPending || feeCompensationPending,
+      );
       throw this.mapWalletError(error);
     }
   }
@@ -568,10 +600,11 @@ export class AuctionRegistrationService {
     preserveCompensationCode = false,
   ) {
     registration.paymentStatus = RegistrationPaymentStatus.FAILED;
-    registration.participationFeeStatus =
-      registration.participationFeeStatus === ParticipationFeeStatus.PAID
-        ? ParticipationFeeStatus.COMPENSATED
-        : ParticipationFeeStatus.FAILED;
+    if (
+      registration.participationFeeStatus === ParticipationFeeStatus.PENDING
+    ) {
+      registration.participationFeeStatus = ParticipationFeeStatus.FAILED;
+    }
     if (!preserveCompensationCode) {
       registration.paymentErrorCode =
         error instanceof WalletClientError
@@ -595,7 +628,18 @@ export class AuctionRegistrationService {
 
   private assertRegistrationOpen(auction: AuctionView) {
     const now = new Date();
-    if (!auction.registrationOpen || now >= auction.registrationEndTime) {
+    const registrationStartTime = auction.registrationStartTime
+      ? new Date(auction.registrationStartTime)
+      : null;
+    if (registrationStartTime && now < registrationStartTime) {
+      throw new ConflictException(
+        'Registration for this auction has not started yet',
+      );
+    }
+    if (
+      !auction.registrationOpen ||
+      now >= new Date(auction.registrationEndTime)
+    ) {
       throw new ConflictException('Registration for this auction is closed');
     }
     if (

@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { AuctionStatus } from '../../common/enums/auction-status.enum';
 import { CreationFeeStatus } from '../../common/enums/creation-fee-status.enum';
 import { DepositStatus } from '../../common/enums/deposit-status.enum';
+import { ParticipationFeeStatus } from '../../common/enums/participation-fee-status.enum';
 import { RegistrationPaymentStatus } from '../../common/enums/registration-payment-status.enum';
 import { RedisCacheService } from '../../common/redis/redis-cache.service';
 import {
@@ -221,6 +222,7 @@ export class BiddingSagaService implements OnModuleInit, OnModuleDestroy {
       await this.reconcileOrphanedCreationHolds();
       await this.reconcileUnsettledCreationFees();
       await this.reconcileStuckRegistrationDeposits();
+      await this.reconcileStuckRegistrationFees();
       await this.reconcileCancelledAuctionDeposits();
     } finally {
       this.sweeping = false;
@@ -378,6 +380,51 @@ export class BiddingSagaService implements OnModuleInit, OnModuleDestroy {
       } catch (error) {
         this.logger.warn(
           `[RegistrationSaga] Will retry stale pending deposit recovery for ${reg._id}: ${this.errorMessage(error)}`,
+        );
+      }
+    }
+  }
+
+  async reconcileStuckRegistrationFees(): Promise<void> {
+    const stuckPaid = await this.registrationModel
+      .find({
+        paymentStatus: {
+          $in: [
+            RegistrationPaymentStatus.FAILED,
+            RegistrationPaymentStatus.COMPENSATING,
+          ],
+        },
+        participationFeeStatus: ParticipationFeeStatus.PAID,
+      })
+      .sort({ updatedAt: 1 })
+      .limit(50)
+      .exec();
+
+    for (const reg of stuckPaid) {
+      const feeAmount = reg.participationFeeAmount?.toString();
+      if (!feeAmount || Number(feeAmount) <= 0) continue;
+      const attempt = reg.paymentAttempt ?? 0;
+      const suffix = attempt > 0 ? `:${attempt}` : '';
+      const refundKey = reg.participationFeeTransactionId
+        ? `${reg._id}:fee:refund:${reg.participationFeeTransactionId}`
+        : `${reg._id}:fee:refund${suffix}`;
+      try {
+        await this.walletClient.refund(reg.carrierId, {
+          auctionId: reg.auctionId,
+          registrationId: reg._id,
+          amount: feeAmount,
+          purpose: 'AUCTION_PARTICIPATION_FEE_REFUND',
+          idempotencyKey: refundKey,
+        });
+        reg.participationFeeStatus = ParticipationFeeStatus.COMPENSATED;
+        reg.paymentStatus = RegistrationPaymentStatus.FAILED;
+        if (reg.paymentErrorCode === 'PARTICIPATION_FEE_COMPENSATION_PENDING') {
+          reg.paymentErrorCode = 'PARTICIPATION_FEE_COMPENSATED';
+        }
+        await reg.save();
+      } catch (error) {
+        this.logger.warn(
+          `[RegistrationSaga] Will retry participation fee refund for ${reg._id}: ${this.errorMessage(error)}`,
         );
       }
     }

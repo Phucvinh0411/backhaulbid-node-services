@@ -99,4 +99,57 @@ describe('auction.mapper', () => {
     expect(dto).not.toHaveProperty('valueDocumentKeys');
     expect(JSON.stringify(dto)).not.toContain('goods-value-docs/');
   });
+
+  it('sets registrationOpen to false before registrationStartTime even when status is PENDING', () => {
+    const now = new Date('2026-11-20T07:00:00.000Z');
+    const doc = {
+      _id: 'auc-not-started',
+      shipperId: 'shipper-1',
+      title: 'Phien chua mo dang ky',
+      goodsType: 'ELECTRONICS',
+      weight: 1000,
+      pickupLocation: {
+        locationName: 'Kho A',
+        address: '1 Le Loi',
+        province: 'TP.HCM',
+      },
+      deliveryLocation: {
+        locationName: 'Kho B',
+        address: '2 Giai Phong',
+        province: 'Ha Noi',
+      },
+      auctionType: 'PUBLIC',
+      maxPrice: Types.Decimal128.fromString('5000000.00'),
+      priceStep: Types.Decimal128.fromString('100000.00'),
+      images: [],
+      notes: '',
+      isDepositRequired: false,
+      depositAmount: null,
+      participationFeeTier: 'LEVEL_2',
+      participationFeeAmount: Types.Decimal128.fromString('20000.00'),
+      creationFeeTier: 'LEVEL_1',
+      creationFeeAmount: Types.Decimal128.fromString('50000.00'),
+      creationFeeStatus: 'SETTLED',
+      registrationStartTime: new Date('2026-11-20T08:00:00.000Z'),
+      registrationEndTime: new Date('2026-11-20T09:30:00.000Z'),
+      startTime: new Date('2026-11-20T09:30:00.000Z'),
+      endTime: new Date('2026-11-20T11:00:00.000Z'),
+      status: AuctionStatus.PENDING,
+      awardAttempts: [],
+      createdAt: now,
+      updatedAt: now,
+    } as unknown as AuctionDocument;
+
+    expect(toAuctionResponse(doc, now).registrationOpen).toBe(false);
+    expect(
+      toAuctionResponse(doc, new Date('2026-11-20T08:00:00.000Z'))
+        .registrationOpen,
+    ).toBe(true);
+    expect(
+      toAuctionResponse(
+        { ...doc, registrationStartTime: null } as unknown as AuctionDocument,
+        now,
+      ).registrationOpen,
+    ).toBe(true);
+  });
 });

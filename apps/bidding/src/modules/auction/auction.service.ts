@@ -378,7 +378,10 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
       throw new ConflictException('Only pending auctions can be updated');
     }
 
-    const nextRegistrationStart = auction.registrationStartTime ?? new Date();
+    const nextRegistrationStart =
+      dto.registrationStartTime !== undefined
+        ? dto.registrationStartTime
+        : (auction.registrationStartTime ?? new Date());
     const nextRegistrationEnd =
       dto.registrationEndTime ?? auction.registrationEndTime;
     const nextStart = dto.startTime ?? auction.startTime;
@@ -435,14 +438,20 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
 
     if (dto.maxPrice !== undefined) {
       const maxPrice = this.parseAmount(dto.maxPrice, 'maxPrice');
+      const creationFee = calculateCreationFee(maxPrice);
+      const currentCreationFeeTier =
+        auction.creationFeeTier ??
+        calculateCreationFee(Number(auction.maxPrice.toString())).tier;
+      if (creationFee.tier !== currentCreationFeeTier) {
+        throw new ConflictException(
+          'Cannot update maxPrice into a different creation fee tier after the creation fee has been charged',
+        );
+      }
+
       const fee = calculateParticipationFee(maxPrice);
       update.maxPrice = maxPrice.toFixed(2);
       update.participationFeeTier = fee.tier;
       update.participationFeeAmount = fee.amount;
-
-      const creationFee = calculateCreationFee(maxPrice);
-      update.creationFeeTier = creationFee.tier;
-      update.creationFeeAmount = creationFee.amount;
 
       if (dto.isDepositRequired === undefined && auction.isDepositRequired) {
         update.depositAmount = auction.depositAmount?.toString() ?? null;
@@ -782,11 +791,13 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
     endTime: Date,
   ) {
     const now = new Date();
+    const isValidDate = (value: unknown): value is Date =>
+      value instanceof Date && !Number.isNaN(value.getTime());
     if (
-      !(registrationStartTime instanceof Date) ||
-      !(registrationEndTime instanceof Date) ||
-      !(startTime instanceof Date) ||
-      !(endTime instanceof Date)
+      !isValidDate(registrationStartTime) ||
+      !isValidDate(registrationEndTime) ||
+      !isValidDate(startTime) ||
+      !isValidDate(endTime)
     ) {
       throw new BadRequestException('Auction times must be valid dates');
     }

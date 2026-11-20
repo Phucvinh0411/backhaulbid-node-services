@@ -37,6 +37,11 @@ export function toAuctionResponse(
   auction: AuctionDocument,
   now: Date = new Date(),
 ) {
+  const registrationStartTime = auction.registrationStartTime
+    ? new Date(auction.registrationStartTime)
+    : null;
+  const registrationEndTime = new Date(auction.registrationEndTime);
+
   return {
     id: auction._id,
     shipperId: auction.shipperId,
@@ -96,7 +101,8 @@ export function toAuctionResponse(
     status: auction.status,
     registrationOpen:
       auction.status === AuctionStatus.PENDING &&
-      now < auction.registrationEndTime,
+      (!registrationStartTime || now >= registrationStartTime) &&
+      now < registrationEndTime,
     roomOpen:
       auction.status === AuctionStatus.OPEN &&
       now >= auction.startTime &&
