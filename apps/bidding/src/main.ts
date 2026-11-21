@@ -5,11 +5,19 @@ import { Transport } from '@nestjs/microservices';
 import { AppModule } from './app.module';
 import { configureOpenApi } from './openapi';
 import { TransformInterceptor } from './core/interceptors/transform.interceptor';
+import { RedisIoAdapter } from './common/redis/redis-io.adapter';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
+  app.enableShutdownHooks();
   const configService = app.get(ConfigService);
+  const redisIoAdapter = new RedisIoAdapter(
+    app,
+    configService.get<string>('REDIS_URL'),
+  );
+  await redisIoAdapter.connectToRedis();
+  app.useWebSocketAdapter(redisIoAdapter);
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

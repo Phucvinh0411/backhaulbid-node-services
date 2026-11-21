@@ -47,6 +47,7 @@ import { BiddingSagaService } from './bidding-saga.service';
 import { MediaFileClient } from '../../integrations/media/media-file.client';
 import { AccountVerificationClient } from '../../integrations/identity/account-verification.client';
 import { confirmedLocation } from '../../common/location-coordinates';
+import { RedisCacheService } from '../../common/redis/redis-cache.service';
 
 @Injectable()
 export class AuctionService implements OnModuleInit, OnModuleDestroy {
@@ -65,6 +66,8 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
     private readonly verificationClient: AccountVerificationClient,
     @Optional()
     private readonly biddingSaga?: BiddingSagaService,
+    @Optional()
+    private readonly redis?: RedisCacheService,
   ) {}
 
   onModuleInit(): void {
@@ -91,6 +94,12 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
 
   private async synchronizeDueAuctions(): Promise<void> {
     if (this.synchronizingDueAuctions) return;
+    const lockKey = 'bidding:auction:sync:lock';
+    const lockToken = randomUUID();
+    const acquired =
+      (await this.redis?.tryAcquireLock(lockKey, lockToken, 15_000)) ?? true;
+    if (!acquired) return;
+
     this.synchronizingDueAuctions = true;
 
     const now = new Date();
@@ -112,6 +121,7 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
       }
     } finally {
       this.synchronizingDueAuctions = false;
+      await this.redis?.releaseLock(lockKey, lockToken);
     }
   }
 
@@ -531,7 +541,9 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
     auction.status = AuctionStatus.CANCELLED;
     auction.cancellationReason = reason?.trim() || null;
     await auction.save();
-    await this.biddingSaga?.releaseCancelledAuctionDeposits(String(auction._id));
+    await this.biddingSaga?.releaseCancelledAuctionDeposits(
+      String(auction._id),
+    );
     this.emitStatus(auction);
     return toAuctionResponse(auction);
   }
@@ -600,7 +612,9 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
     if (!auction) throw new NotFoundException('Auction not found');
     this.assertOwnerOrAdmin(auction, actorId, role);
     if (auction.status !== AuctionStatus.COMPLETED || !auction.winningBidId) {
-      throw new ConflictException('A completed auction with a selected winner is required');
+      throw new ConflictException(
+        'A completed auction with a selected winner is required',
+      );
     }
     const winningBid = await this.bidModel
       .findOne({ _id: auction.winningBidId, auctionId: auction._id })
@@ -776,10 +790,17 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async ensureAward(auction: AuctionDocument) {
-    if (auction.awardStatus === 'CREATED' || auction.awardStatus === 'NO_WINNER') return;
-    if (!auction.winningBidId && auction.auctionType === AuctionType.SEALED) return;
+    if (
+      auction.awardStatus === 'CREATED' ||
+      auction.awardStatus === 'NO_WINNER'
+    )
+      return;
+    if (!auction.winningBidId && auction.auctionType === AuctionType.SEALED)
+      return;
     const winningBid = auction.winningBidId
-      ? await this.bidModel.findOne({ _id: auction.winningBidId, auctionId: auction._id }).exec()
+      ? await this.bidModel
+          .findOne({ _id: auction.winningBidId, auctionId: auction._id })
+          .exec()
       : null;
     await this.awardService.createForWinner(auction, winningBid);
   }

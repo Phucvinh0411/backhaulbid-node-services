@@ -3,13 +3,21 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Transport } from '@nestjs/microservices';
 import { AppModule } from './app.module.js';
+import { RedisIoAdapter } from './common/redis-io.adapter.js';
 
 async function bootstrap() {
   const logger = new Logger('NotificationBootstrap');
 
   // HTTP + WebSocket (Socket.io) server
   const app = await NestFactory.create(AppModule);
+  app.enableShutdownHooks();
   const configService = app.get(ConfigService);
+  const redisIoAdapter = new RedisIoAdapter(
+    app,
+    configService.get<string>('REDIS_URL'),
+  );
+  await redisIoAdapter.connectToRedis();
+  app.useWebSocketAdapter(redisIoAdapter);
 
   app.useGlobalPipes(
     new ValidationPipe({

@@ -22,10 +22,12 @@ COPY . .
 RUN npm run build:${APP}
 
 # Prune devDependencies to keep the runtime small
-RUN npm prune --production
+RUN npm prune --production && chown -R node:node /app
+
+USER node
 
 ARG PORT=3001
 EXPOSE ${PORT}
 
 ENV APP=${APP}
-CMD ["sh", "-c", "node dist/apps/${APP}/main.js"]
+CMD ["sh", "-c", "exec node dist/apps/${APP}/main.js"]

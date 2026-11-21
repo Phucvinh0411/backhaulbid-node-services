@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as net from 'node:net';
+import * as tls from 'node:tls';
 
 export type RespValue = string | number | null | RespValue[];
 
@@ -99,7 +100,12 @@ export function parseRespFrame(buf: Buffer, offset = 0): RespFrame | null {
     for (let i = 0; i < count; i++) {
       const elem = parseRespFrame(buf, cursor);
       if (!elem) return null;
-      if (elem.isError) return { isError: true, message: elem.message, nextOffset: elem.nextOffset };
+      if (elem.isError)
+        return {
+          isError: true,
+          message: elem.message,
+          nextOffset: elem.nextOffset,
+        };
       items.push(elem.value);
       cursor = elem.nextOffset;
     }
@@ -130,6 +136,7 @@ interface RedisEndpoint {
   username?: string;
   password?: string;
   db?: number;
+  tls: boolean;
 }
 
 @Injectable()
@@ -299,7 +306,9 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     try {
       const parsed = new URL(rawUrl);
       if (parsed.protocol !== 'redis:' && parsed.protocol !== 'rediss:') {
-        this.logger.warn(`Unsupported REDIS_URL protocol "${parsed.protocol}", running in pass-through mode`);
+        this.logger.warn(
+          `Unsupported REDIS_URL protocol "${parsed.protocol}", running in pass-through mode`,
+        );
         return null;
       }
       const host = parsed.hostname || '127.0.0.1';
@@ -318,6 +327,7 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
         username,
         password,
         db: db !== undefined && Number.isInteger(db) && db > 0 ? db : undefined,
+        tls: parsed.protocol === 'rediss:',
       };
     } catch (error) {
       this.logger.warn(
@@ -350,7 +360,9 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
           entry.timer = null;
           reject(new Error('Redis command timeout'));
           if (this.inflightQueue.length > MAX_STALE_INFLIGHT) {
-            this.handleDisconnect(new Error('Too many timed-out Redis commands'));
+            this.handleDisconnect(
+              new Error('Too many timed-out Redis commands'),
+            );
           }
         }, COMMAND_TIMEOUT_MS);
         entry.timer.unref?.();
@@ -394,8 +406,10 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     this.ready = false;
     this.rxBuffer = Buffer.alloc(0);
 
-    const { host, port, username, password, db } = this.endpoint;
-    const sock = net.createConnection({ host, port });
+    const { host, port, username, password, db, tls: useTls } = this.endpoint;
+    const sock: net.Socket = useTls
+      ? tls.connect({ host, port, servername: host })
+      : net.createConnection({ host, port });
     this.socket = sock;
     sock.setNoDelay(true);
 
@@ -406,7 +420,7 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     }, CONNECT_TIMEOUT_MS);
     connectTimer.unref?.();
 
-    sock.on('connect', () => {
+    sock.on(useTls ? 'secureConnect' : 'connect', () => {
       if (this.socket !== sock) return;
       this.connecting = false;
 
@@ -458,7 +472,9 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
       clearTimeout(connectTimer);
       if (this.socket !== sock) return;
       if (this.reconnectAttempts === 0) {
-        this.logger.warn(`Redis connection error (${err.message}), failing open`);
+        this.logger.warn(
+          `Redis connection error (${err.message}), failing open`,
+        );
       }
       this.handleDisconnect(err);
     });
@@ -470,7 +486,10 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private writeRawOnSocket(sock: net.Socket, args: string[]): Promise<RespValue> {
+  private writeRawOnSocket(
+    sock: net.Socket,
+    args: string[],
+  ): Promise<RespValue> {
     return new Promise<RespValue>((resolve, reject) => {
       const entry: InflightCommand = {
         settled: false,
@@ -515,7 +534,9 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
 
   private onData(chunk: Buffer): void {
     this.rxBuffer =
-      this.rxBuffer.length === 0 ? chunk : Buffer.concat([this.rxBuffer, chunk]);
+      this.rxBuffer.length === 0
+        ? chunk
+        : Buffer.concat([this.rxBuffer, chunk]);
 
     let offset = 0;
     try {

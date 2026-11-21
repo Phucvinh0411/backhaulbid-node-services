@@ -1,6 +1,8 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { ConflictException, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { RedisCacheService } from '../../common/redis/redis-cache.service';
 import { AuctionService } from '../auction/auction.service';
 import { AuctionStatus } from '../../common/enums/auction-status.enum';
 import { AuctionType } from '../../common/enums/auction-type.enum';
@@ -23,11 +25,12 @@ export class BidService {
     private readonly registrationService: AuctionRegistrationService,
     private readonly coverageClient: CarrierCoverageClient,
     private readonly verificationClient: AccountVerificationClient,
+    @Optional() private readonly redis?: RedisCacheService,
   ) {}
 
   async place(auctionId: string, carrierId: string, dto: PlaceBidDto) {
+    await this.verificationClient.assertVerified(carrierId);
     return this.withAuctionLock(auctionId, async () => {
-      await this.verificationClient.assertVerified(carrierId);
       const idempotencyKey = dto.idempotencyKey?.trim();
       if (idempotencyKey) {
         const existing = await this.bidModel
@@ -41,7 +44,9 @@ export class BidService {
         carrierId,
       );
       if (!access.canEnter) {
-        throw new ConflictException(`Carrier cannot bid: ${access.accessStatus}`);
+        throw new ConflictException(
+          `Carrier cannot bid: ${access.accessStatus}`,
+        );
       }
 
       const auction = await this.auctionService.findById(auctionId);
@@ -78,7 +83,10 @@ export class BidService {
           .findOne({ auctionId })
           .sort({ bidAmount: 1, bidTime: 1 })
           .exec();
-        if (currentLowest && amount >= Number(currentLowest.bidAmount.toString())) {
+        if (
+          currentLowest &&
+          amount >= Number(currentLowest.bidAmount.toString())
+        ) {
           throw new ConflictException(
             'Bid must be lower than the current lowest bid',
           );
@@ -120,7 +128,9 @@ export class BidService {
     const skip = (query.page - 1) * query.pageSize;
     const ownBidCount =
       role === 'CARRIER'
-        ? await this.bidModel.countDocuments({ auctionId, carrierId: viewerId }).exec()
+        ? await this.bidModel
+            .countDocuments({ auctionId, carrierId: viewerId })
+            .exec()
         : null;
     const [items, totalItems] = await Promise.all([
       this.bidModel
@@ -156,9 +166,26 @@ export class BidService {
     this.auctionLocks.set(auctionId, queued);
 
     await previous;
+    const lockKey = `bidding:bid:lock:${auctionId}`;
+    const lockToken = randomUUID();
+    let redisAcquired = false;
     try {
+      for (let attempt = 0; attempt < 15; attempt++) {
+        redisAcquired =
+          (await this.redis?.tryAcquireLock(lockKey, lockToken, 5_000)) ?? true;
+        if (redisAcquired) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (!redisAcquired) {
+        throw new ConflictException(
+          'Auction is busy processing another bid, please retry',
+        );
+      }
       return await work();
     } finally {
+      if (redisAcquired) {
+        await this.redis?.releaseLock(lockKey, lockToken);
+      }
       release();
       if (this.auctionLocks.get(auctionId) === queued) {
         this.auctionLocks.delete(auctionId);
