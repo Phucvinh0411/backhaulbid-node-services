@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisCacheService } from '../../common/redis/redis-cache.service';
+import { resolveInternalHttpTimeoutMs } from '../internal-http-timeout';
 
 export const MINIMUM_AUCTION_REPUTATION_SCORE = 70;
 
@@ -18,6 +19,7 @@ export interface CarrierReputation {
 export class CarrierReputationClient {
   private readonly baseUrl: string;
   private readonly internalToken: string;
+  private readonly timeoutMs: number;
 
   constructor(
     config: ConfigService,
@@ -25,6 +27,7 @@ export class CarrierReputationClient {
   ) {
     this.baseUrl = config.getOrThrow<string>('FLEET_SERVICE_URL').replace(/\/$/, '');
     this.internalToken = config.getOrThrow<string>('INTERNAL_SERVICE_TOKEN');
+    this.timeoutMs = resolveInternalHttpTimeoutMs(config);
   }
 
   async getScore(carrierId: string): Promise<number> {
@@ -33,7 +36,7 @@ export class CarrierReputationClient {
       try {
         response = await fetch(`${this.baseUrl}/internal/carrier-reputations/${carrierId}`, {
           headers: { 'x-internal-token': this.internalToken },
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(this.timeoutMs),
         });
       } catch (error) {
         throw new ServiceUnavailableException(

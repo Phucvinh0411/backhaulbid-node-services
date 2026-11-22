@@ -4,6 +4,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { resolveInternalHttpTimeoutMs } from '../internal-http-timeout';
 
 export const SHIPPER_EKYC_REQUIRED_MESSAGE =
   'Chủ hàng phải hoàn tất xác thực eKYC người đại diện trước khi tạo phiên đấu giá';
@@ -24,12 +25,14 @@ export interface EkycEligibilityStatus {
 export class EkycVerificationClient {
   private readonly baseUrl: string;
   private readonly internalToken: string;
+  private readonly timeoutMs: number;
 
   constructor(config: ConfigService) {
     this.baseUrl = config
       .getOrThrow<string>('IDENTITY_SERVICE_URL')
       .replace(/\/$/, '');
     this.internalToken = config.getOrThrow<string>('INTERNAL_SERVICE_TOKEN');
+    this.timeoutMs = resolveInternalHttpTimeoutMs(config);
   }
 
   async isVerified(accountId: string): Promise<boolean> {
@@ -39,7 +42,7 @@ export class EkycVerificationClient {
         `${this.baseUrl}/internal/ekyc-verifications/accounts/${encodeURIComponent(accountId)}/eligibility`,
         {
           headers: { 'x-internal-token': this.internalToken },
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(this.timeoutMs),
         },
       );
     } catch (error) {

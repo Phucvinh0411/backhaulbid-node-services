@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisCacheService } from '../../common/redis/redis-cache.service';
+import { resolveInternalHttpTimeoutMs } from '../internal-http-timeout';
 
 export const CARGO_COVERAGE_REQUIRED_MESSAGE =
   'Đấu giá này yêu cầu nhà xe có chứng từ bảo hiểm trách nhiệm hàng hóa còn hiệu lực đã được xác minh';
@@ -22,6 +23,7 @@ export interface CarrierCoverageStatus {
 export class CarrierCoverageClient {
   private readonly baseUrl: string;
   private readonly internalToken: string;
+  private readonly timeoutMs: number;
 
   constructor(
     config: ConfigService,
@@ -29,6 +31,7 @@ export class CarrierCoverageClient {
   ) {
     this.baseUrl = config.getOrThrow<string>('IDENTITY_SERVICE_URL').replace(/\/$/, '');
     this.internalToken = config.getOrThrow<string>('INTERNAL_SERVICE_TOKEN');
+    this.timeoutMs = resolveInternalHttpTimeoutMs(config);
   }
 
   async isEligible(carrierId: string): Promise<boolean> {
@@ -39,7 +42,7 @@ export class CarrierCoverageClient {
           `${this.baseUrl}/internal/cargo-liability/accounts/${encodeURIComponent(carrierId)}/eligibility`,
           {
             headers: { 'x-internal-token': this.internalToken },
-            signal: AbortSignal.timeout(5000),
+            signal: AbortSignal.timeout(this.timeoutMs),
           },
         );
       } catch (error) {

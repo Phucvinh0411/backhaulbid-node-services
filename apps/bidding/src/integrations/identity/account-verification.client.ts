@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisCacheService } from '../../common/redis/redis-cache.service';
+import { resolveInternalHttpTimeoutMs } from '../internal-http-timeout';
 
 export const EKYC_REQUIRED_MESSAGE =
   'Tài khoản cần hoàn tất xác thực định danh người đại diện (eKYC) trước khi thực hiện thao tác này';
@@ -27,6 +28,7 @@ export interface AccountVerificationStatus {
 export class AccountVerificationClient {
   private readonly baseUrl: string;
   private readonly internalToken: string;
+  private readonly timeoutMs: number;
 
   constructor(
     config: ConfigService,
@@ -36,6 +38,7 @@ export class AccountVerificationClient {
       .getOrThrow<string>('IDENTITY_SERVICE_URL')
       .replace(/\/$/, '');
     this.internalToken = config.getOrThrow<string>('INTERNAL_SERVICE_TOKEN');
+    this.timeoutMs = resolveInternalHttpTimeoutMs(config);
   }
 
   async getStatus(accountId: string): Promise<AccountVerificationStatus> {
@@ -46,7 +49,7 @@ export class AccountVerificationClient {
           `${this.baseUrl}/internal/accounts/${encodeURIComponent(accountId)}/verification-status`,
           {
             headers: { 'x-internal-token': this.internalToken },
-            signal: AbortSignal.timeout(5000),
+            signal: AbortSignal.timeout(this.timeoutMs),
           },
         );
       } catch (error) {

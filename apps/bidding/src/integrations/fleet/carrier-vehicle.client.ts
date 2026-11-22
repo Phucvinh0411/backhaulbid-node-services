@@ -4,6 +4,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { resolveInternalHttpTimeoutMs } from '../internal-http-timeout';
 
 export interface CarrierVehicle {
   id: string;
@@ -17,11 +18,13 @@ export interface CarrierVehicle {
 @Injectable()
 export class CarrierVehicleClient {
   private readonly baseUrl: string;
+  private readonly timeoutMs: number;
 
   constructor(config: ConfigService) {
     this.baseUrl = config
       .getOrThrow<string>('FLEET_SERVICE_URL')
       .replace(/\/$/, '');
+    this.timeoutMs = resolveInternalHttpTimeoutMs(config);
   }
 
   async listByCarrier(carrierId: string): Promise<CarrierVehicle[]> {
@@ -34,7 +37,7 @@ export class CarrierVehicleClient {
             'X-User-Id': carrierId,
             'X-User-Role': 'CARRIER',
           },
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(this.timeoutMs),
         },
       );
     } catch (error) {
