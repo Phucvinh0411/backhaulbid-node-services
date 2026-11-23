@@ -262,6 +262,35 @@ export class AuctionRegistrationService {
       reputationScore,
       minimumReputationScore: MINIMUM_AUCTION_REPUTATION_SCORE,
     };
+
+    if (registration?.status === RegistrationStatus.CANCELLED) {
+      return {
+        ...reputation,
+        canRegister: false,
+        canEnter: false,
+        accessStatus: 'REGISTRATION_CANCELLED',
+        registrationId: registration._id,
+      };
+    }
+
+    const now = new Date();
+    if (auction.status === AuctionStatus.CANCELLED) {
+      return {
+        ...reputation,
+        canRegister: false,
+        canEnter: false,
+        accessStatus: 'AUCTION_CANCELLED',
+      };
+    }
+    if (auction.status === AuctionStatus.COMPLETED || now >= auction.endTime) {
+      return {
+        ...reputation,
+        canRegister: false,
+        canEnter: false,
+        accessStatus: 'AUCTION_COMPLETED',
+      };
+    }
+
     if (!verification.ekycVerified) {
       return {
         canRegister: false,
@@ -307,16 +336,6 @@ export class AuctionRegistrationService {
       };
     }
 
-    if (registration.status === RegistrationStatus.CANCELLED) {
-      return {
-        ...reputation,
-        canRegister: false,
-        canEnter: false,
-        accessStatus: 'REGISTRATION_CANCELLED',
-        registrationId: registration._id,
-      };
-    }
-
     if (registration.paymentStatus !== RegistrationPaymentStatus.COMPLETED) {
       return {
         ...reputation,
@@ -329,23 +348,6 @@ export class AuctionRegistrationService {
       };
     }
 
-    const now = new Date();
-    if (auction.status === AuctionStatus.CANCELLED) {
-      return {
-        ...reputation,
-        canRegister: false,
-        canEnter: false,
-        accessStatus: 'AUCTION_CANCELLED',
-      };
-    }
-    if (auction.status === AuctionStatus.COMPLETED || now >= auction.endTime) {
-      return {
-        ...reputation,
-        canRegister: false,
-        canEnter: false,
-        accessStatus: 'AUCTION_COMPLETED',
-      };
-    }
     if (now < auction.startTime) {
       return {
         ...reputation,

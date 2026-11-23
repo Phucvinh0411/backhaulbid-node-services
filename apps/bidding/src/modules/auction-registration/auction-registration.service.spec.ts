@@ -302,4 +302,74 @@ describe('AuctionRegistrationService registration window & fee compensation', ()
       'PARTICIPATION_FEE_COMPENSATED',
     );
   });
+
+  it('preserves terminal auction states even when carrier reputation dropped below threshold', async () => {
+    const now = Date.now();
+    const completedAuction = {
+      id: 'auc-done-1',
+      status: AuctionStatus.COMPLETED,
+      startTime: new Date(now - 7200_000),
+      endTime: new Date(now - 3600_000),
+      registrationEndTime: new Date(now - 10800_000),
+      registrationOpen: false,
+      requireCarrierCoverage: false,
+    };
+    const cancelledAuction = {
+      id: 'auc-cancel-1',
+      status: AuctionStatus.CANCELLED,
+      startTime: new Date(now + 3600_000),
+      endTime: new Date(now + 7200_000),
+      registrationEndTime: new Date(now + 1800_000),
+      registrationOpen: false,
+      requireCarrierCoverage: false,
+    };
+    const openAuction = {
+      id: 'auc-open-1',
+      status: AuctionStatus.OPEN,
+      startTime: new Date(now - 600_000),
+      endTime: new Date(now + 3600_000),
+      registrationEndTime: new Date(now - 1800_000),
+      registrationOpen: false,
+      requireCarrierCoverage: false,
+    };
+
+    const auctionService = {
+      findById: jest.fn().mockImplementation((id: string) =>
+        Promise.resolve(
+          id === 'auc-done-1'
+            ? completedAuction
+            : id === 'auc-cancel-1'
+              ? cancelledAuction
+              : openAuction,
+        ),
+      ),
+    };
+    const registrationModel = {
+      findOne: jest.fn().mockReturnValue({
+        exec: jest.fn().mockResolvedValue({
+          _id: 'reg-1',
+          status: RegistrationStatus.REGISTERED,
+          paymentStatus: RegistrationPaymentStatus.COMPLETED,
+        }),
+      }),
+    };
+    const service = new AuctionRegistrationService(
+      registrationModel as any,
+      auctionService as any,
+      {} as any,
+      { getScore: jest.fn().mockResolvedValue(55) } as any,
+      { assertVerifiedVehicle: jest.fn() } as any,
+      { getStatus: jest.fn().mockResolvedValue({ ekycVerified: true, businessVerified: true, fullyVerified: true }) } as any,
+      { isEligible: jest.fn().mockResolvedValue(true) } as any,
+    );
+
+    const doneAccess = await service.getAccess('auc-done-1', 'carrier-1');
+    const cancelledAccess = await service.getAccess('auc-cancel-1', 'carrier-1');
+    const openAccess = await service.getAccess('auc-open-1', 'carrier-1');
+
+    expect(doneAccess.accessStatus).toBe('AUCTION_COMPLETED');
+    expect(cancelledAccess.accessStatus).toBe('AUCTION_CANCELLED');
+    expect(openAccess.accessStatus).toBe('REPUTATION_TOO_LOW');
+    expect(openAccess.canEnter).toBe(false);
+  });
 });
