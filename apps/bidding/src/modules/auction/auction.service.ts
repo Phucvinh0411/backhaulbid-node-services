@@ -698,6 +698,15 @@ export class AuctionService implements OnModuleInit, OnModuleDestroy {
     return toAuctionResponse(auction);
   }
 
+  async unflag(auctionId: string) {
+    const auction = await this.auctionRepo.findById(auctionId);
+    if (!auction) throw new NotFoundException('Auction not found');
+    auction.fraudFlag = false;
+    auction.fraudReason = null;
+    await auction.save();
+    return toAuctionResponse(auction);
+  }
+
   private emitStatus(
     auction: AuctionDocument,
     winningBidAmount: string | null = null,

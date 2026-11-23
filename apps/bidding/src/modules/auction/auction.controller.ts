@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   Headers,
@@ -163,6 +164,15 @@ export class AuctionController {
   ) {
     requireRole(role, 'ADMIN');
     return this.auctionService.flag(auctionId, dto);
+  }
+
+  @Delete(':auctionId/fraud-flag')
+  unflag(
+    @Param('auctionId') auctionId: string,
+    @Headers('x-user-role') role: string | undefined,
+  ) {
+    requireRole(role, 'ADMIN');
+    return this.auctionService.unflag(auctionId);
   }
 
   @Post(':auctionId/complete')
